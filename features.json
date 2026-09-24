@@ -3,7 +3,7 @@
   "version": 2,
   "default": false,
   "kill": false,
-  "notice": "欢迎使用 XLMod V4.0。使用前请阅读群内说明；如遇问题请在群里反馈并附上日志（面板底部「日志」→ 导出）。",
+  "notice": "欢迎使用 XLMod V4.0。本软件无任何群聊，请注意辨别。另外xlmod不会收集个人信息，请放心使用",
   "features": {
     "identity": true,
     "teacher_tools": false,

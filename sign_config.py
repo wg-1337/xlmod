@@ -21,6 +21,11 @@ import subprocess
 import sys
 import os
 
+# openssl 可执行文件：优先环境变量 XLMod_OPENSSL（Windows 下 cmd 的 PATH 里通常没有 openssl，
+# 但 Git for Windows 自带；update_license.bat 会自动探测并设置该变量）
+OPENSSL = os.environ.get('XLMod_OPENSSL') or 'openssl'
+
+
 def _find_key(name):
     """在 keys/、../keys/、%XLMod_KEYS% 里找密钥（仓库里只有公钥，私钥在作者本地）"""
     cands = [os.path.join('keys', name),
@@ -55,7 +60,7 @@ def sign(path, skip_if_same=False):
             return
     if not os.path.exists(PRIV):
         raise SystemExit('找不到私钥：%s\n（私钥只在作者本机，别提交到仓库）' % PRIV)
-    subprocess.run(['openssl', 'dgst', '-sha256', '-sign', PRIV, '-out', sig_path + '.bin', path], check=True)
+    subprocess.run([OPENSSL, 'dgst', '-sha256', '-sign', PRIV, '-out', sig_path + '.bin', path], check=True)
     with open(sig_path + '.bin', 'rb') as f:
         raw = f.read()
     os.remove(sig_path + '.bin')
@@ -73,7 +78,7 @@ def verify(path):
     raw = base64.b64decode(open(sig_path).read().strip())
     with open(sig_path + '.bin', 'wb') as f:
         f.write(raw)
-    r = subprocess.run(['openssl', 'dgst', '-sha256', '-verify', PUB, '-signature', sig_path + '.bin', path],
+    r = subprocess.run([OPENSSL, 'dgst', '-sha256', '-verify', PUB, '-signature', sig_path + '.bin', path],
                        capture_output=True)
     os.remove(sig_path + '.bin')
     ok = (r.returncode == 0)
@@ -106,7 +111,7 @@ def check_bundle(path='license.json'):
     sig = base64.b64decode(o['sig'])
     open('_bz.bin', 'wb').write(raw)
     open('_bz.sig', 'wb').write(sig)
-    r = subprocess.run(['openssl', 'dgst', '-sha256', '-verify', PUB, '-signature', '_bz.sig', '_bz.bin'],
+    r = subprocess.run([OPENSSL, 'dgst', '-sha256', '-verify', PUB, '-signature', '_bz.sig', '_bz.bin'],
                        capture_output=True)
     os.remove('_bz.bin')
     os.remove('_bz.sig')

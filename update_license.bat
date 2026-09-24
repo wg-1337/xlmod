@@ -1,15 +1,20 @@
 ﻿@echo off
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
-title XLMod 授权配置更新（签名 + 打包 + 推送）
+title XLMod 授权更新 V1.1
+set "VER=1.1"
 
 rem ============================================================
-rem  XLMod 授权一键更新脚本
-rem    update_license.bat              正常流程：签名 -> 打包 -> 校验 -> 推送 -> 远程复验
-rem    update_license.bat edit         先打开记事本编辑 features.json，再走上面的流程
-rem    update_license.bat nopush       只做本地签名/打包/校验，不推送
-rem    update_license.bat edit nopush  编辑 + 本地校验（不推送）
-rem  目录约定：脚本放在项目根目录（与 keys\ 同级）；若存在 tmp-repo\（GitHub 克隆），则作为推送目标仓库。
+rem  XLMod 授权一键更新脚本 V1.1
+rem
+rem  用法：
+rem    update_license.bat            签名 打包 校验 推送 远程复验
+rem    update_license.bat edit       先编辑 features.json 再执行
+rem    update_license.bat nopush     只做本地签名 打包 校验
+rem    edit nopush                   编辑并只做本地校验
+rem
+rem  说明：脚本会自动定位 python 与 openssl（Git for Windows 自带）；
+rem        私钥可放在 keys\ 或上级目录的 keys\ 里。
 rem ============================================================
 
 set "WS=%~dp0"
@@ -17,61 +22,93 @@ cd /d "%WS%"
 
 set "EDIT=0"
 set "PUSH=1"
-for %%A in (%*) do (
-    if /i "%%~A"=="edit"   set "EDIT=1"
-    if /i "%%~A"=="nopush" set "PUSH=0"
+if not "%~1"=="" (
+    if /i "%~1"=="edit"   set "EDIT=1"
+    if /i "%~1"=="nopush" set "PUSH=0"
+)
+if not "%~2"=="" (
+    if /i "%~2"=="edit"   set "EDIT=1"
+    if /i "%~2"=="nopush" set "PUSH=0"
 )
 
-if exist "%WS%tmp-repo\features.json" (
-    set "REPO=%WS%tmp-repo"
-) else (
-    set "REPO=%WS%"
-)
+set "REPO=%WS%"
+if exist "%WS%tmp-repo\features.json" set "REPO=%WS%tmp-repo"
 
 echo ============================================================
-echo  XLMod 授权更新
-echo   工作目录 : %WS%
+echo  XLMod 授权更新 V%VER%
+echo   脚本目录 : %WS%
 echo   仓库目录 : %REPO%
-echo   是否推送 : %PUSH%   （1=推送  0=不推送）
+echo   是否推送 : %PUSH%   1 推送   0 不推送
 echo ============================================================
 echo.
 
-where python >nul 2>&1 || (echo [错误] 找不到 python，请先安装并加入 PATH & goto :fail)
-where openssl >nul 2>&1 || (echo [错误] 找不到 openssl，请先安装并加入 PATH & goto :fail)
-where git >nul 2>&1 || (echo [错误] 找不到 git，请先安装并加入 PATH & goto :fail)
-echo [1/7] 环境检查通过（python / openssl / git）
-
-if not exist "%REPO%\features.json" (
-    echo [错误] %REPO%\features.json 不存在，请确认目录结构
+rem ---------- 1) 定位 python ----------
+set "PY="
+where python >nul 2>&1 && set "PY=python"
+if not defined PY (
+    where py >nul 2>&1 && set "PY=py -3"
+)
+if not defined PY (
+    if exist "C:\Python314\python.exe" set "PY=C:\Python314\python.exe"
+)
+if not defined PY (
+    echo [错误] 找不到 python。请安装 Python 3 并勾选 Add to PATH，
+    echo        或把 python.exe 路径写进本脚本的 PY 变量。
     goto :fail
 )
-if not exist "%WS%keys\xlmod_config_ec_private.pem" (
-    if not exist "%REPO%\keys\xlmod_config_ec_private.pem" (
-        echo [错误] 找不到签名私钥 xlmod_config_ec_private.pem
-        echo        请放在 %WS%keys\ 或 %REPO%\keys\ 下（私钥不要提交到仓库）
-        goto :fail
-    )
-)
-echo [2/7] 私钥就位
+echo [1/7] python 就绪 : %PY%
 
+rem ---------- 2) 定位 openssl（cmd 的 PATH 里通常没有，Git 自带） ----------
+set "OPENSSL="
+where openssl >nul 2>&1 && set "OPENSSL=openssl"
+if not defined OPENSSL if exist "%ProgramFiles%\Git\usr\bin\openssl.exe" set "OPENSSL=%ProgramFiles%\Git\usr\bin\openssl.exe"
+if not defined OPENSSL if exist "%ProgramFiles%\Git\mingw64\bin\openssl.exe" set "OPENSSL=%ProgramFiles%\Git\mingw64\bin\openssl.exe"
+if not defined OPENSSL if exist "%ProgramFiles(x86)%\Git\usr\bin\openssl.exe" set "OPENSSL=%ProgramFiles(x86)%\Git\usr\bin\openssl.exe"
+if not defined OPENSSL if exist "%LOCALAPPDATA%\Programs\Git\usr\bin\openssl.exe" set "OPENSSL=%LOCALAPPDATA%\Programs\Git\usr\bin\openssl.exe"
+if not defined OPENSSL if exist "C:\OpenSSL-Win64\bin\openssl.exe" set "OPENSSL=C:\OpenSSL-Win64\bin\openssl.exe"
+if not defined OPENSSL if defined XLMod_OPENSSL set "OPENSSL=%XLMod_OPENSSL%"
+if not defined OPENSSL (
+    echo [错误] 找不到 openssl。
+    echo        最省事：安装 Git for Windows（自带 openssl），或设置环境变量 XLMod_OPENSSL 指向 openssl.exe。
+    goto :fail
+)
+set "XLMod_OPENSSL=%OPENSSL%"
+echo [2/7] openssl 就绪 : %OPENSSL%
+
+rem ---------- 3) 检查私钥（keys\ 或上级 keys\） ----------
+set "KEYDIR="
+if exist "%WS%keys\xlmod_config_ec_private.pem" set "KEYDIR=%WS%keys"
+if not defined KEYDIR if exist "%WS%..\keys\xlmod_config_ec_private.pem" set "KEYDIR=%WS%..\keys"
+if not defined KEYDIR if exist "%WS%..\..\keys\xlmod_config_ec_private.pem" set "KEYDIR=%WS%..\..\keys"
+if not defined KEYDIR (
+    echo [错误] 找不到签名私钥 xlmod_config_ec_private.pem。
+    echo        请放到 %WS%keys\ 或上级 keys\ 目录里（私钥不要提交到仓库）。
+    goto :fail
+)
+if not exist "%REPO%\features.json" (
+    echo [错误] %REPO%\features.json 不存在，请确认目录结构。
+    goto :fail
+)
+echo [3/7] 私钥就位 : %KEYDIR%
+
+rem ---------- 4) 可选编辑 ----------
 if "%EDIT%"=="1" (
-    echo [3/7] 打开记事本编辑配置（保存并关闭窗口后继续）...
+    echo [4/7] 打开记事本编辑配置，保存并关闭窗口后继续...
     start /wait notepad "%REPO%\features.json"
 ) else (
-    echo [3/7] 跳过编辑（如需编辑：update_license.bat edit）
+    echo [4/7] 跳过编辑。需要编辑请运行: update_license.bat edit
 )
 
-echo [4/7] 签名配置...
+rem ---------- 5) 签名 + 打包 + 校验 ----------
+echo [5/7] 签名并生成 license.json ...
 pushd "%REPO%"
-python "%WS%sign_config.py" sign features.json --skip-if-same
+%PY% "%WS%sign_config.py" sign features.json --skip-if-same
 if errorlevel 1 ( popd & echo [错误] 签名失败 & goto :fail )
-python "%WS%sign_config.py" verify features.json
+%PY% "%WS%sign_config.py" verify features.json
 if errorlevel 1 ( popd & echo [错误] 验签失败 & goto :fail )
-
-echo [5/7] 生成 license.json（配置+签名单文件）并校验...
-python "%WS%sign_config.py" bundle features.json
+%PY% "%WS%sign_config.py" bundle features.json
 if errorlevel 1 ( popd & echo [错误] 打包失败 & goto :fail )
-python "%WS%sign_config.py" check-bundle license.json
+%PY% "%WS%sign_config.py" check-bundle license.json
 if errorlevel 1 ( popd & echo [错误] license.json 校验失败 & goto :fail )
 popd
 
@@ -82,8 +119,9 @@ if exist "%WS%xlmod-config\" (
     copy /y "%REPO%\license.json"          "%WS%xlmod-config\license.json"          >nul 2>&1
 )
 
+rem ---------- 6) 提交并推送 ----------
 if "%PUSH%"=="1" (
-    echo [6/7] 提交并推送...
+    echo [6/7] 提交并推送 ...
     pushd "%REPO%"
     git add -A
     git diff --cached --quiet
@@ -92,55 +130,51 @@ if "%PUSH%"=="1" (
         if errorlevel 1 ( popd & echo [错误] 提交失败 & goto :fail )
         git push origin main
         if errorlevel 1 (
-            echo       推送失败，尝试绕过本地代理重试...
+            echo       推送失败，改为绕过本地代理重试 ...
             git -c http.proxy= -c https.proxy= push origin main
         )
-        if errorlevel 1 (
-            echo [警告] 推送返回非零（本环境常见：远端其实已更新）
-            echo        下面用远端实际内容复验，能验通就说明已生效。
-        )
     ) else (
-        echo       没有变化，无需提交（配置与上次一致）
+        echo       没有变化，无需提交。
     )
     popd
 ) else (
-    echo [6/7] 跳过推送（nopush）
+    echo [6/7] 跳过推送。
 )
 
-echo [7/7] 远程复验（抓取远端 license.json 并验签）...
+rem ---------- 7) 远程复验 ----------
+echo [7/7] 远程复验 ...
 set "TMPJ=%TEMP%\xlmod_license_check_%RANDOM%.json"
-curl -sS -m 60 -o "%TMPJ%" "https://raw.githubusercontent.com/wg-1337/xlmod/main/license.json?cb=%RANDOM%"
+curl -sS -m 60 -o "%TMPJ%" "https://raw.githubusercontent.com/wg-1337/xlmod/main/license.json"
 if errorlevel 1 (
-    curl -sS -m 60 --noproxy "*" -o "%TMPJ%" "https://raw.githubusercontent.com/wg-1337/xlmod/main/license.json?cb=%RANDOM%"
+    curl -sS -m 60 --noproxy "*" -o "%TMPJ%" "https://raw.githubusercontent.com/wg-1337/xlmod/main/license.json"
 )
-if errorlevel 1 (
-    echo [警告] 下载失败（网络问题？）。稍后可重跑本脚本复验。
+if not exist "%TMPJ%" (
+    echo [警告] 远端下载失败，稍后可重跑本脚本复验。
     goto :done
 )
 pushd "%REPO%"
-python "%WS%sign_config.py" check-bundle "%TMPJ%"
+%PY% "%WS%sign_config.py" check-bundle "%TMPJ%"
 if errorlevel 1 (
     popd
-    echo [警告] 远端验签未通过：可能是 CDN 缓存还没刷新（一般 5 分钟内自愈）。
-    echo        端上会保持锁定，稍后重跑本脚本即可复验。
+    echo [警告] 远端验签未通过：可能是 CDN 缓存未刷新，端上会保持锁定，稍后重跑即可。
     del "%TMPJ%" >nul 2>&1
     goto :done
 )
 popd
-python "%WS%show_license.py" "%TMPJ%"
-python "%WS%compare_license.py" "%REPO%\license.json" "%TMPJ%"
+%PY% "%WS%show_license.py" "%TMPJ%"
+%PY% "%WS%compare_license.py" "%REPO%\license.json" "%TMPJ%"
 del "%TMPJ%" >nul 2>&1
 echo.
 echo ================== 完成 ==================
-echo  端上地址：https://raw.githubusercontent.com/wg-1337/xlmod/main/license.json
-echo  生效时间：端上最长 60 秒自动校验（也可在面板点「立即校验授权」）
-echo  仓库页面：https://github.com/wg-1337/xlmod/blob/main/license.json
+echo  端上地址 https://raw.githubusercontent.com/wg-1337/xlmod/main/license.json
+echo  生效时间 端上最长 60 秒自动校验，也可在面板点 立即校验授权
+echo  仓库页面 https://github.com/wg-1337/xlmod
 goto :done
 
 :fail
 echo.
 echo ============== 失败，未完成 ==============
-echo  把上面的报错信息截图发我即可。
+echo  把上面的报错截图发我即可。
 
 :done
 echo.
