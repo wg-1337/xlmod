@@ -1,0 +1,34 @@
+# 闭源/生成物：请勿提交到公开仓库
+# —— 宿主 App 的反编译产物与重打包产物（版权原因）
+apktool-out/
+jadx-out/
+jadx/
+*.apk
+*.dex
+*.smali
+xueleyun_*
+# —— 构建中间产物
+obf-src/
+obf-classes/
+obf-dex/
+obf-dex-backup/
+guard-classes/
+guard-dex/
+guard-dex-build-*/
+tmp-*/
+*.class
+*.err
+*.log
+evidence/
+mod-stub-classes/
+mod-classes/
+mod-dex/
+mod-stubs/
+kotlin/
+harness/
+# —— 编辑器/系统
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+.DS_Store
