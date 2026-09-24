@@ -85,7 +85,7 @@ if exist "%WS%xlmod-config\" (
 if "%PUSH%"=="1" (
     echo [6/7] 提交并推送...
     pushd "%REPO%"
-    git add features.json features.json.sig features.json.sha256 license.json
+    git add -A
     git diff --cached --quiet
     if errorlevel 1 (
         git -c user.name="XLMod" -c user.email="xlmod@users.noreply.github.com" commit -m "授权配置更新"
