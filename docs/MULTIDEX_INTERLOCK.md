@@ -1,5 +1,8 @@
 # 多 dex 互锁（防删 / 拖慢逆向）设计说明
 
+> 说明：本文档为**设计与验证记录**。涉及宿主 App 的**注入点细节（类名/方法名/补丁内容）不在本仓库**，
+> 由作者私有的注入骨架提供；这里只保留原理、判据、验证方法与排障思路。
+
 > 目标：把 Mod 的**真实代码分片到多个 dex**，并插入大量**环环相扣但结果无用**的计算，
 > 使得**删掉任何一个 dex 都会让 Mod 整体失效**。运行期代价几乎为零，静态分析与"删减重打包"的代价很高。
 
@@ -8,8 +11,6 @@
 | dex | 内容 | 说明 |
 |---|---|---|
 | `classes7.dex` | Mod 主逻辑（`XLModActivity` / `XLModHelper` / `XLModConfig` / `XLModFeatures` / `Obf`） | R8 全量重命名 + 字符串加密（密钥不再是常量） |
-| `classes8.dex` | `net.xuele.xuelets.mod.guard.Guard8` | 守卫 A：约 300 行 filler 链 + `a()` / `tag()` |
-| `classes9.dex` | `net.xuele.xuelets.mod.guard.Guard9` | 守卫 B：约 300 行 filler 链 + `b()` / `tag()` |
 
 > ART 只按 `classes.dex, classes2.dex …` 顺序加载到**第一个缺口**，所以三个 dex 的索引必须连续
 > （构建脚本 `inject_dexes.py` 会做连续性断言）。
@@ -49,7 +50,6 @@ python verify_dex_interlock.py          # ⑧ 验证互锁（见下）
 ⚠️ 注意：
 1. `guard_gen.py` 每次运行都会用固定种子生成**同样的**常量（可复现），但一旦改动生成器/种子，**必须重跑 ③**（否则密钥对不上，所有字符串变乱码）；
 2. `build_guard.py` 写出的 `guard-key.txt` 是 ③ 的唯一密钥来源；缺文件时 ③ 会退回 `0x5A`（老版兼容模式，此时互锁不成立）；
-3. `obf-rules.pro` 里 `net.xuele.xuelets.mod.guard.Guard8/Guard9` 的 keep 规则不能删（否则 R8 改名，反射取不到）。
 
 ## 4. 验证（`verify_dex_interlock.py` 的 5 组断言）
 

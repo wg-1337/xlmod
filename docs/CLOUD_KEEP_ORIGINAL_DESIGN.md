@@ -1,5 +1,8 @@
 # 云端保持原片（Cloud Keep Original）—— 设计记录 / 防改坏手册
 
+> 说明：本文档为**设计与验证记录**。涉及宿主 App 的**注入点细节（类名/方法名/补丁内容）不在本仓库**，
+> 由作者私有的注入骨架提供；这里只保留原理、判据、验证方法与排障思路。
+
 > 目的：**以后任何人（包括 AI 会话）改这个功能前先读本文件**。
 > 这是一条"客户端伪装 + 扩展名伪装"绕开服务端转码的方案，任何一处漏改都会**静默失效**（不报错、只是又被压缩），
 > 所以本文件把「原理 → 配方 → 全部注入点 → 不变量 → 自检 → 排障」写全。
@@ -46,18 +49,13 @@
 
 | # | 位置（`apktool-out/...`） | 注入内容 | 校验命令（期望命中） |
 |---|---|---|---|
-| 1 | `smali_classes4/net/xuele/android/common/upload/task/SingleFileTask.smali` | `compressVideo()`：`getCompressMode()==1` 且/或 云原片开启 → **跳过本地压缩**（`goto :xlmod_skip` → `prepareSplitFile(原文件, 原md5)`） | `grep -c "isCloudKeepOriginal" SingleFileTask.smali` → **5**（compressVideo 门控 ×1 + 伪装/ext 检查 ×4） |
 | 2 | 同上（`prepareSplitFile` 内，分块上传入口 `blockUploadInit`） | 云原片 + 视频 → `p1 = disguiseFileForCloud(p1)`；`p2 = disguisedMd5(p1)` | `grep -c "disguiseFileForCloud"` → **2**；`disguisedMd5` → **2** |
 | 3 | 同上（`uploadFile` 内，整文件上传入口 `upload`） | 同上（文件与 md5 都要换） | 同上 |
 | 4 | 同上（两处 ext 变量赋值） | `ext = uploadExtFor(name)`（云原片开启时**强制 "bin"**） | `grep -c "uploadExtFor"` → **2** |
-| 5 | `smali_classes4/net/xuele/android/common/compress/info/VideoFormatHelper.smali` | `getResolutionBitRate()`：云原片开启 → 返回 100 Mbps（使 `needCompress` 恒 false，双保险）；另含 `compressMode==3 && kbps>0` 的码率覆盖 | `grep -c "isCloudKeepOriginal" VideoFormatHelper.smali` → **1** |
-| 6 | `smali_classes4/net/xuele/android/common/compress/info/VideoUtils.smali` | `needCompress()` 调用 `XLModHelper.logNeedCompress(path)`（"压缩判定仪表"，只打日志不改判定） | `grep -c "logNeedCompress" VideoUtils.smali` → **1** |
-| 7 | `smali_classes4/net/xuele/android/common/upload/FileUploadManager.smali` | `prepareCloudKeepOriginal(List)`：**发作业业务层**直接把资源改成：`setPath(伪装文件)`、`setFileSize(新大小)`、`setFileMd5(伪装文件 md5)`、`setFileExtension(bin)`、`setSourceMd5("")`、`setFileKey("")` | `grep -c "prepareCloudKeepOriginal" FileUploadManager.smali` → **1** |
 | 8 | `mod-src/.../XLModActivity.java`（面板「视频上传压缩」） | 云原片开关 / 上传扩展名下拉 / 一键成功配方按钮 / 红字提示 | 见 §9 |
 
 **为什么要 2 与 3 都改**：上传有小文件直传（`uploadFile`）与大文件分块（`prepareSplitFile`→`blockUploadInit`）两条路，
 只改一条 → "有些视频能绕、有些不能"。
-**为什么要 7**：发作业的视频走 `UploadTask → FileUploadManager`，业务层会把路径/md5/扩展名重新写一遍，
 不在这一层也换掉，前面 2/3 的努力会被覆盖。
 
 ---
@@ -68,14 +66,12 @@ smali 注入点靠**方法名+签名**调用，R8 改名会让调用变成 `NoSu
 `obf-rules.pro` 必须始终保留：
 
 ```proguard
--keep class net.xuele.xuelets.mod.XLModHelper {
     java.io.File disguiseFileForCloud(java.io.File);     # 生成伪装副本（header spoof）
     java.lang.String disguisedMd5(java.io.File);         # 伪装副本的 md5（服务端按它校验）
     java.lang.String uploadExtFor(java.lang.String);     # 云原片开启 → 强制 "bin"
     void prepareCloudKeepOriginal(java.util.List);       # 发作业业务层适配
     void logNeedCompress(java.lang.String);              # 判定仪表
 }
--keep class net.xuele.xuelets.mod.XLModConfig {
     boolean isCloudKeepOriginal();                       # 云原片总开关（obf-rules 第 30 行）
     int getCompressMode();                               # 压缩模式（第 27 行）
     int getCompressKbps();                               # 第 26 行
@@ -120,13 +116,6 @@ smali 注入点靠**方法名+签名**调用，R8 改名会让调用变成 `NoSu
 cd F:/Android/AndroidDev/project/xuelemod
 
 # ① 注入点是否齐全（期望：5 / 2 / 2 / 2 / 1 / 1 / 1）
-grep -c "isCloudKeepOriginal" apktool-out/smali_classes4/net/xuele/android/common/upload/task/SingleFileTask.smali
-grep -c "disguiseFileForCloud" apktool-out/smali_classes4/net/xuele/android/common/upload/task/SingleFileTask.smali
-grep -c "disguisedMd5"        apktool-out/smali_classes4/net/xuele/android/common/upload/task/SingleFileTask.smali
-grep -c "uploadExtFor"        apktool-out/smali_classes4/net/xuele/android/common/upload/task/SingleFileTask.smali
-grep -c "isCloudKeepOriginal" apktool-out/smali_classes4/net/xuele/android/common/compress/info/VideoFormatHelper.smali
-grep -c "logNeedCompress"     apktool-out/smali_classes4/net/xuele/android/common/compress/info/VideoUtils.smali
-grep -c "prepareCloudKeepOriginal" apktool-out/smali_classes4/net/xuele/android/common/upload/FileUploadManager.smali
 
 # ② keep 清单是否还在
 grep -n "disguiseFileForCloud\|disguisedMd5\|uploadExtFor\|prepareCloudKeepOriginal" obf-rules.pro
@@ -178,7 +167,6 @@ python mp4_inspect.py 压缩视频示范/压缩前.mp4          # 看改前的 t
 6. **自拷贝**：同一路径复制会让文件被截断（已加 `sCloudDisguisedPaths` + 路径相等判断）。
 7. **只注入一条上传链路**：出现"部分视频被压"的假象。
 8. **忘记 keep 规则**：R8 改名后调用抛 `NoSuchMethodError`，异常被吞 → 静默失效（最难查的一类）。
-9. **压缩模式前提**：早期实现要求 `compressMode==1` 才跳过本地压缩；现在改为"云原片开启即跳过"（`VideoFormatHelper.getResolutionBitRate` 再兜底 100Mbps），避免用户忘记设模式。
 
 ---
 
@@ -224,7 +212,6 @@ java -jar apktool/apktool.jar b -f -j 1 apktool-out -o xueleyun_mod_unsigned_ui.
 | 配置 | `mod-src/net/xuele/xuelets/mod/XLModConfig.java`（`isCloudKeepOriginal` / `getHwUploadExtMode` / 压缩相关） |
 | 面板 | `mod-src/net/xuele/xuelets/mod/XLModActivity.java`（「视频上传压缩」分组 + 一键成功配方） |
 | 混淆 keep | `obf-rules.pro` |
-| 注入点（app 侧） | `apktool-out/smali_classes4/net/xuele/android/common/upload/task/SingleFileTask.smali`、`.../upload/FileUploadManager.smali`、`.../compress/info/VideoUtils.smali`、`.../compress/info/VideoFormatHelper.smali` |
 | 分析/验证工具 | `mp4_inspect.py`、`mp4_diff.py`、`analyze_success_case.py`、`find_cloud.py`、`verify_avatar_patch.py`（对比 dex 指令数的方法可复用） |
 | 样例视频 | `压缩视频示范/成功案例.mp4`（不被转码）、`压缩前.mp4`（会被转码）、`压缩后.mp4`（服务端转码产物） |
 | 相关笔记 | `TECH_NOTES_CLOUD_KEEP.md`、`UPLOAD_CHAIN_ANALYSIS.md`、`VIDEO_CLOUD_COMPRESS_ANALYSIS.md` |

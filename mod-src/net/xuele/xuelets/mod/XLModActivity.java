@@ -42,7 +42,7 @@ import java.io.FileWriter;
 public class XLModActivity extends Activity {
 
     /** 面板版本号（页面标题后展示） */
-    private static final String MOD_VER = "V3.5p";
+    private static final String MOD_VER = "V4.0";
 
     // Miuix / MIUI 风格色板
     private static final int C_BG     = 0xFFF4F5F7;
@@ -182,23 +182,15 @@ public class XLModActivity extends Activity {
         }
         tvFeat.setText(sbFeat.toString());
         cardFeat.addView(tvFeat);
-        final EditText etFeatUrl = inputRow(cardFeat, "配置地址", XLModFeatures.url(), ++rowId);
-        etFeatUrl.addTextChangedListener(new SimpleWatcher() {
-            @Override
-            public void afterTextChanged(android.text.Editable e) {
-                XLModFeatures.setUrl(etFeatUrl.getText().toString());
-            }
-        });
-        actionButton(cardFeat, "立即刷新配置", true, new View.OnClickListener() {
+        actionButton(cardFeat, "立即校验授权（拉取签名配置）", true, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                XLModFeatures.setUrl(etFeatUrl.getText().toString());
                 XLModFeatures.refreshAsync(XLModActivity.this, true);
-                Toast.makeText(XLModActivity.this, "正在获取配置…（获取失败会保持锁定）", Toast.LENGTH_SHORT).show();
+                Toast.makeText(XLModActivity.this, "正在校验授权…（签名不过或过期都会保持锁定）", Toast.LENGTH_SHORT).show();
             }
         });
         addCard(content, cardFeat);
-        tip(content, "配置没拿到时，除「隐私隐藏 / 日志」外全部功能锁定；App 在前台每 1 分钟自动检查一次，配置有变化会立即生效。");
+        tip(content, "授权配置由作者私钥签名，端上只验签（地址写死，无法自建配置解锁）；未通过校验或已过期时，除「隐私隐藏 / 日志」外全部锁定；App 在前台每 1 分钟自动校验，配置有变化立即生效。");
 
         // ===== 教师身份 =====
         boolean gIdentity = addGroupHeaderGated(content, "教师身份", "identity");

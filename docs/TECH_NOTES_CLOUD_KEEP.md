@@ -1,5 +1,8 @@
 # 云原片（不被服务端转码）技术细节记录
 
+> 说明：本文档为**设计与验证记录**。涉及宿主 App 的**注入点细节（类名/方法名/补丁内容）不在本仓库**，
+> 由作者私有的注入骨架提供；这里只保留原理、判据、验证方法与排障思路。
+
 > ⚠️ **改动此功能前先读 `CLOUD_KEEP_ORIGINAL_DESIGN.md`**（注入点全表 / keep 清单 / 不变量 / 自检清单 / 排障手册）—— 本文是早期实测分析，配方与坑以设计记录为准。
 
 > 结论来自用户提供的**成功案例**（`压缩视频示范/成功案例.mp4`，下载链接 `http://dl.xueleyun.com/files/74c869ad581c5705684cc85d2e5cdb53.mp4`），
@@ -67,11 +70,8 @@
 | 强制"云原片时也要走本地压缩流程" | 同上，等于放弃原画质 |
 
 ## 五、发作业链路（本 Mod 新增，老版没有）
-`AssignHomeworkFragment.assign()` → `UploadTask.start()` → **`FileUploadManager.start()`** → `SingleFileTaskManager.addTask()`。
-在 `FileUploadManager.start()` 顶部注入 `XLModHelper.prepareCloudKeepOriginal(mFileList)`（**早于** `UploadDataHelper.refreshFileKey()`/服务端去重）：
 对列表里每个视频资源 → 路径换成伪装副本、`fileMd5` 按副本重算、`sourceMd5`/`fileKey` 清空重算、
 `fileExtension` = bin（`uploadExtFor`）、`fileSize` 同步为副本长度。
-之后链路末端 `SingleFileTask` 会再套一遍同一套伪装（幂等，命中缓存）。
 
 ## 六、复现与验证
 ```bash

@@ -32,3 +32,7 @@ harness/
 *.iml
 Thumbs.db
 .DS_Store
+
+# 私钥（绝不提交）
+keys/*_private.pem
+keys/*.key

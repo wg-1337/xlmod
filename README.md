@@ -27,19 +27,28 @@
 
 ## 2. 远程授权与公告（重要）
 
-功能**由仓库根目录的 [`features.json`](features.json) 控制**，端上地址：
+功能**由仓库根目录的签名配置控制**：
 
 ```
-https://raw.githubusercontent.com/wg-1337/xlmod/main/features.json
+features.json      授权配置（JSON）
+features.json.sig  作者私钥签发的 ECDSA P-256 签名（Base64）
 ```
 
-* **拉不到配置 → 锁死**：除 `privacy`、`logs` 外全部功能区禁用（**不读本地缓存**，这是刻意的限制语义）；
-* 拉到配置 → 按 `features` 逐项开关；未列出的项按 `default`（缺省 `false`）；
-* `"kill": true` → 远程熔断，全部停用；
-* `notice` → **公告**，每次打开 Mod 面板弹出；
-* App 在前台**每 60 秒**拉一次，配置有变化**立即生效**（面板实时重建）。
+* **端上只内置公钥**：验签不过 / 下载失败 / 已过期 → **锁死**（除 `privacy`、`logs` 外全部禁用，不读本地缓存）；
+* **地址写死在代码里**（`XLModFeatures.DEFAULT_URL`），面板不提供修改入口 → 用户无法自建配置自解锁；
+* 拉到配置 → 按 `features` 逐项开关，未列出的按 `default`（缺省 `false`）；`"kill": true` 全停；
+* `notice` = **公告**，每次打开 Mod 面板弹出；
+* `expires` = 有效期（epoch 秒，`0`/缺省表示不过期），过期自动锁定；
+* App 在前台**每 60 秒**校验一次，配置有变化**立即生效**。
 
-详细字段与示例见 [`docs/REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md)。
+签发（作者本地，私钥不进仓库）：
+
+```bash
+python sign_config.py sign   features.json    # 生成 features.json.sig
+python sign_config.py verify features.json    # 校验
+```
+
+字段与示例见 [`docs/REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md)。
 
 ## 3. 代码结构
 
