@@ -54,6 +54,26 @@ python sign_config.py verify features.json    # 校验
 
 字段与示例见 [`docs/REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md)。
 
+### Windows 一键更新（推荐）
+
+仓库根目录提供 `update_license.bat`（双击即可）：
+
+```
+update_license.bat              签名 → 打包 → 校验 → 提交推送 → 远程复验
+update_license.bat edit         先打开记事本改 features.json，再走上面的流程
+update_license.bat nopush       只做本地签名/打包/校验
+```
+
+脚本会：
+1. 检查 `python / openssl / git`；
+2. 用私钥签名 `features.json`（**配置未改动会自动跳过**，避免无意义提交）；
+3. 生成单文件 `license.json`（配置 + 签名）并本地校验；
+4. `git add/commit/push`（推送失败会自动绕过本地代理重试）；
+5. **下载远端 `license.json` 验签，并与本地比对**：一致=已生效；不一致=CDN 缓存未刷新（一般 5 分钟内自愈）。
+
+配套小工具：`sign_config.py`（sign / verify / bundle / check-bundle）、`show_license.py`（打印配置摘要）、
+`compare_license.py`（本地 vs 远端一致性）。
+
 ## 3. 代码结构
 
 ```

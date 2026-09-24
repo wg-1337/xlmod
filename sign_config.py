@@ -21,20 +21,49 @@ import subprocess
 import sys
 import os
 
-PUB = 'keys/xlmod_config_ec_public.pem'
-PRIV = 'keys/xlmod_config_ec_private.pem'
+def _find_key(name):
+    """在 keys/、../keys/、%XLMod_KEYS% 里找密钥（仓库里只有公钥，私钥在作者本地）"""
+    cands = [os.path.join('keys', name),
+             os.path.join('..', 'keys', name),
+             os.path.join(os.environ.get('XLMod_KEYS', ''), name) if os.environ.get('XLMod_KEYS') else None]
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return os.path.join('keys', name)      # 默认路径（报错信息更直观）
 
 
-def sign(path):
+PUB = _find_key('xlmod_config_ec_public.pem')
+PRIV = _find_key('xlmod_config_ec_private.pem')
+
+
+def _normalize_lf(path):
+    """把配置规范成 LF 行尾：git 入库会把 CRLF 转 LF；
+    若签名用的是 CRLF 字节，仓库里的明文配置就会验签失败（回退路径）。"""
+    data = open(path, 'rb').read()
+    data = data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+    open(path, 'wb').write(data)
+
+
+def sign(path, skip_if_same=False):
     sig_path = path + '.sig'
+    sha_path = path + '.sha256'
+    _normalize_lf(path)
+    cur = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    if skip_if_same and os.path.exists(sig_path) and os.path.exists(sha_path):
+        if open(sha_path).read().strip() == cur:
+            print('配置未改动（sha256 %s…），跳过重新签名' % cur[:12])
+            return
+    if not os.path.exists(PRIV):
+        raise SystemExit('找不到私钥：%s\n（私钥只在作者本机，别提交到仓库）' % PRIV)
     subprocess.run(['openssl', 'dgst', '-sha256', '-sign', PRIV, '-out', sig_path + '.bin', path], check=True)
     with open(sig_path + '.bin', 'rb') as f:
         raw = f.read()
     os.remove(sig_path + '.bin')
     with open(sig_path, 'w') as f:
         f.write(base64.b64encode(raw).decode())
+    open(sha_path, 'w').write(cur + '\n')
     print('已签名: %s (%d 字节签名)' % (sig_path, len(raw)))
-    print('配置 sha256: %s' % hashlib.sha256(open(path, 'rb').read()).hexdigest())
+    print('配置 sha256: %s' % cur)
 
 
 def verify(path):
@@ -91,9 +120,14 @@ if __name__ == '__main__':
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
     cmd = sys.argv[1]
+    args = [a for a in sys.argv[2:] if not a.startswith('-')]
+    flags = [a for a in sys.argv[2:] if a.startswith('-')]
+    if cmd == 'sign':
+        sign(args[0], '--skip-if-same' in flags)
+        sys.exit(0)
     if cmd == 'bundle':
-        bundle(sys.argv[2])
+        bundle(args[0])
     elif cmd == 'check-bundle':
-        check_bundle(sys.argv[2] if len(sys.argv) > 2 else 'license.json')
+        check_bundle(args[0] if args else 'license.json')
     else:
         {'sign': sign, 'verify': verify}[cmd](sys.argv[2])

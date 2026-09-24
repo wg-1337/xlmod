@@ -70,3 +70,19 @@ https://raw.githubusercontent.com/wg-1337/xlmod/main/features.json
 1. 配置**不落盘**：端上只在内存里保存当前配置，重启 App 后必须重新拉到才会解锁（这是刻意的限制语义）；
 2. 断网 / 仓库 404 / JSON 写错 → 保持锁定；错误原因与地址会显示在面板「授权状态（远程配置）」里，也会写日志 `[功能开关]`；
 3. 修改配置后最长 60 秒生效，也可以在面板点「立即刷新配置」立刻生效。
+
+
+## 6. Windows 一键更新脚本
+
+仓库根目录 `update_license.bat`：
+
+```bat
+update_license.bat            :: 签名 -> 打包 license.json -> 校验 -> 推送 -> 远程复验
+update_license.bat edit       :: 先编辑 features.json 再执行
+update_license.bat nopush     :: 只本地校验，不推送
+```
+
+* 私钥放 `keys/xlmod_config_ec_private.pem`（**不要提交**）；
+* 配置没改动时自动跳过重新签名（ECDSA 每次签名都不同，避免无意义 diff）；
+* 脚本结尾会下载远端 `license.json` 验签并**与本地比对**，明确告诉你"远端是否已生效"；
+* 若推送失败（常见于本地代理没开），脚本会自动 `-c http.proxy= -c https.proxy=` 重试。
