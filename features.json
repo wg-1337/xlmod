@@ -1,9 +1,9 @@
 {
   "_comment": "XLMod 远程授权配置（仓库 wg-1337/xlmod）。拉到这个文件才解锁功能；拉不到 → 除 privacy/logs 外全部锁定。",
-  "version": 1,
+  "version": 2,
   "default": false,
   "kill": false,
-  "notice": "欢迎使用 XLMod V3.5p。使用前请阅读群内说明；如遇问题请在群里反馈并附上日志（面板底部「日志」→ 导出）。",
+  "notice": "欢迎使用 XLMod V4.0。使用前请阅读群内说明；如遇问题请在群里反馈并附上日志（面板底部「日志」→ 导出）。",
   "features": {
     "identity": true,
     "teacher_tools": true,
