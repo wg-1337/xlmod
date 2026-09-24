@@ -89,8 +89,9 @@ def verify(path):
 
 
 def bundle(path):
-    """把 配置 + 签名 打成一个 license.json（单文件 → CDN 不会出现"新旧不同步"）。
+    """把 配置 + 签名 打成一个 license.json（单文件，避免 CDN 上"配置/签名两份缓存"不同步）。
        结构：{"payload":"<base64(配置原始字节)>","sig":"<base64(签名)>"}
+       注意：以 LF 写出 —— git 入库会把 CRLF 转 LF，写 CRLF 会造成"每次运行都像有改动"的噪音。
     """
     import json as _json
     raw = open(path, 'rb').read()
@@ -98,8 +99,10 @@ def bundle(path):
     if not os.path.exists(sig_path):
         raise SystemExit('缺少 %s（先 sign）' % sig_path)
     sig = open(sig_path).read().strip()
-    out = _json.dumps({'payload': base64.b64encode(raw).decode(), 'sig': sig}, ensure_ascii=False, indent=2)
-    open('license.json', 'w', encoding='utf-8').write(out)
+    out = _json.dumps({'payload': base64.b64encode(raw).decode(), 'sig': sig},
+                      ensure_ascii=False, indent=2)
+    with open('license.json', 'w', encoding='utf-8', newline='\n') as f:
+        f.write(out)
     print('已生成 license.json（%d 字节，payload=%d 字节）' % (len(out), len(raw)))
 
 
