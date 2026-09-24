@@ -110,14 +110,14 @@ echo       没有新改动需要提交。
 :check_remote
 for /f %%H in ('git rev-parse HEAD') do set "LOCALHEAD=%%H"
 set "REMOTEHEAD="
-for /f "tokens=1" %%H in ('git -c http.proxy= -c https.proxy= ls-remote --heads origin main 2>nul') do set "REMOTEHEAD=%%H"
+for /f "tokens=1" %%H in ('git -c http.proxy= -c https.proxy= ls-remote --heads origin main 2^>nul') do set "REMOTEHEAD=%%H"
 if "!REMOTEHEAD!"=="!LOCALHEAD!" goto :remote_ok
 echo       正在推送 ...
 git push origin main
 if errorlevel 1 echo       直连失败，改为绕过本地代理重试 ...
 if errorlevel 1 git -c http.proxy= -c https.proxy= push origin main
 set "REMOTEHEAD="
-for /f "tokens=1" %%H in ('git -c http.proxy= -c https.proxy= ls-remote --heads origin main 2>nul') do set "REMOTEHEAD=%%H"
+for /f "tokens=1" %%H in ('git -c http.proxy= -c https.proxy= ls-remote --heads origin main 2^>nul') do set "REMOTEHEAD=%%H"
 if "!REMOTEHEAD!"=="!LOCALHEAD!" goto :push_ok
 echo       [重要] 推送没成功：GitHub 暂时连不上。本地提交已完成，不会丢。
 echo              稍后重跑本脚本即可，或在 %REPO% 里执行 git push origin main
