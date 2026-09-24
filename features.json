@@ -12,7 +12,7 @@
     "homework": true,
     "auto_sign": true,
     "auto_challenge": true,
-    "cloud_flower": true,
+    "cloud_flower": false,
     "rank": true,
     "answer": true,
     "privacy": true,
