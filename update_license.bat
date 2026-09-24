@@ -133,6 +133,13 @@ if "%PUSH%"=="1" (
             echo       推送失败，改为绕过本地代理重试 ...
             git -c http.proxy= -c https.proxy= push origin main
         )
+        for /f %%H in ('git rev-parse HEAD') do set "LOCALHEAD=%%H"
+        set "REMOTEHEAD="
+        for /f "tokens=1" %%H in ('git -c http.proxy= -c https.proxy= ls-remote --heads origin main 2^>nul') do set "REMOTEHEAD=%%H"
+        if not "!REMOTEHEAD!"=="!LOCALHEAD!" (
+            echo       [重要] 推送没成功：GitHub 暂时连不上。本地已经提交好了，不会丢。
+            echo              稍后重跑本脚本（或在此目录执行 git push origin main）即可。
+        )
     ) else (
         echo       没有变化，无需提交。
     )
