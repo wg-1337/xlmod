@@ -54,7 +54,46 @@ def verify(path):
         sys.exit(1)
 
 
+def bundle(path):
+    """把 配置 + 签名 打成一个 license.json（单文件 → CDN 不会出现"新旧不同步"）。
+       结构：{"payload":"<base64(配置原始字节)>","sig":"<base64(签名)>"}
+    """
+    import json as _json
+    raw = open(path, 'rb').read()
+    sig_path = path + '.sig'
+    if not os.path.exists(sig_path):
+        raise SystemExit('缺少 %s（先 sign）' % sig_path)
+    sig = open(sig_path).read().strip()
+    out = _json.dumps({'payload': base64.b64encode(raw).decode(), 'sig': sig}, ensure_ascii=False, indent=2)
+    open('license.json', 'w', encoding='utf-8').write(out)
+    print('已生成 license.json（%d 字节，payload=%d 字节）' % (len(out), len(raw)))
+
+
+def check_bundle(path='license.json'):
+    """校验 license.json：签名必须能验证 payload"""
+    import json as _json
+    o = _json.load(open(path, encoding='utf-8'))
+    raw = base64.b64decode(o['payload'])
+    sig = base64.b64decode(o['sig'])
+    open('_bz.bin', 'wb').write(raw)
+    open('_bz.sig', 'wb').write(sig)
+    r = subprocess.run(['openssl', 'dgst', '-sha256', '-verify', PUB, '-signature', '_bz.sig', '_bz.bin'],
+                       capture_output=True)
+    os.remove('_bz.bin')
+    os.remove('_bz.sig')
+    ok = (r.returncode == 0)
+    print(('license.json 校验通过' if ok else 'license.json 校验失败'))
+    if not ok:
+        sys.exit(1)
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
-    {'sign': sign, 'verify': verify}[sys.argv[1]](sys.argv[2])
+    cmd = sys.argv[1]
+    if cmd == 'bundle':
+        bundle(sys.argv[2])
+    elif cmd == 'check-bundle':
+        check_bundle(sys.argv[2] if len(sys.argv) > 2 else 'license.json')
+    else:
+        {'sign': sign, 'verify': verify}[cmd](sys.argv[2])

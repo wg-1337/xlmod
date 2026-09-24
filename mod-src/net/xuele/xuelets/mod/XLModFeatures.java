@@ -86,6 +86,14 @@ public final class XLModFeatures {
         return DEFAULT_URL;
     }
 
+    /** 单文件授权地址：把 DEFAULT_URL 末尾的 features.json 换成 license.json */
+    public static String bundleUrl() {
+        final String tail = "features.json";
+        return DEFAULT_URL.endsWith(tail)
+                ? DEFAULT_URL.substring(0, DEFAULT_URL.length() - tail.length()) + "license.json"
+                : DEFAULT_URL + ".bundle";
+    }
+
     public static void setListener(Listener l) {
         sListener = l;
     }
@@ -168,15 +176,30 @@ public final class XLModFeatures {
             @Override
             public void run() {
                 try {
-                    byte[] cfg = httpGet(url());
-                    byte[] sigB64 = httpGet(url() + ".sig");
-                    if (cfg == null || sigB64 == null) {
+                    // 优先用"单文件" license.json（配置+签名在同一文件里）：
+                    // 两个文件各自走 CDN 缓存时会出现"新签名配旧配置"的不同步，导致误锁；
+                    // 单文件只有一份缓存，从根上避免该问题。取不到时回退到 features.json + .sig。
+                    byte[] cfg = null;
+                    byte[] sig = null;
+                    byte[] bundle = httpGet(bundleUrl());
+                    if (bundle != null) {
+                        JSONObject b = new JSONObject(new String(bundle, "UTF-8").trim());
+                        cfg = android.util.Base64.decode(b.getString("payload"), android.util.Base64.DEFAULT);
+                        sig = android.util.Base64.decode(b.getString("sig"), android.util.Base64.DEFAULT);
+                    } else {
+                        byte[] c = httpGet(url());
+                        byte[] sigB64 = httpGet(url() + ".sig");
+                        if (c != null && sigB64 != null) {
+                            cfg = c;
+                            sig = android.util.Base64.decode(new String(sigB64, "UTF-8").trim(),
+                                    android.util.Base64.DEFAULT);
+                        }
+                    }
+                    if (cfg == null || sig == null) {
                         sErr = "配置或签名下载失败";
                         XLModConfig.logAppend("[功能开关] " + sErr + "（保持锁定）");
                         return;
                     }
-                    byte[] sig = android.util.Base64.decode(new String(sigB64, "UTF-8").trim(),
-                            android.util.Base64.DEFAULT);
                     if (!verify(cfg, sig)) {
                         sErr = "签名校验失败";
                         XLModConfig.logAppend("[功能开关] 配置签名校验失败（保持锁定）");

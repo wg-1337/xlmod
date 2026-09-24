@@ -30,9 +30,13 @@
 功能**由仓库根目录的签名配置控制**：
 
 ```
-features.json      授权配置（JSON）
+license.json       单文件授权（配置 + 签名打包在一起，推荐；避免 CDN 缓存不同步导致误锁）
+features.json      授权配置（明文，便于维护/审阅）
 features.json.sig  作者私钥签发的 ECDSA P-256 签名（Base64）
 ```
+
+App 会**优先读取 license.json**（配置与签名同文件 → 只有一份缓存，不会出现新签名配旧配置）；
+取不到时回退到 features.json + features.json.sig。
 
 * **端上只内置公钥**：验签不过 / 下载失败 / 已过期 → **锁死**（除 `privacy`、`logs` 外全部禁用，不读本地缓存）；
 * **地址写死在代码里**（`XLModFeatures.DEFAULT_URL`），面板不提供修改入口 → 用户无法自建配置自解锁；
