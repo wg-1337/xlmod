@@ -74,6 +74,10 @@ update_license.bat nopush       只做本地签名/打包/校验
 配套小工具：`sign_config.py`（sign / verify / bundle / check-bundle）、`show_license.py`（打印配置摘要）、
 `compare_license.py`（本地 vs 远端一致性）。
 
+## 3. 开始开发前请先读
+
+* **[`DEVELOPMENT_GUIDE.md`](DEVELOPMENT_GUIDE.md)** —— 开发引导：文档地图 + "改哪个功能要动哪些文件"对照表 + 硬约束/坑 + 标准工作流 + 交付要求。
+
 ## 3. 代码结构
 
 ```

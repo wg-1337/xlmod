@@ -102,7 +102,7 @@ pushd "%REPO%"
 git add -A
 git diff --cached --quiet
 if not errorlevel 1 goto :no_new_commit
-git -c user.name="XLMod" -c user.email="xlmod@users.noreply.github.com" commit -m "授权配置更新"
+git commit -m "授权配置更新"
 if errorlevel 1 goto :commit_fail
 goto :check_remote
 :no_new_commit
