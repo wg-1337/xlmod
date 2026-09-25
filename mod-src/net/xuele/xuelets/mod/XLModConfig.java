@@ -61,6 +61,48 @@ public class XLModConfig {
         // MMKV 不可用：等 init(context) 后用 SharedPreferences 回退
     }
 
+    /**
+     * 早期自加载：类被首次访问时（哪怕是在别的 dex 的 smali 里读 {@code sPrivacyMode}）就把隐私配置读进来。
+     *
+     * <p>为什么要这么早：{@code DeviceUtil.getDeviceId()/getInstallId()} 的 smali 钩子是**直接读静态字段**的，
+     * 如果字段还没初始化（=0），隐私就等于没开。这里通过反射拿 Application（不新增 classes.dex 的方法引用，
+     * 因为那个 dex 的方法数已满），拿不到就留给 {@link #ensurePrivacySynced()} 在后续请求时补上。</p>
+     *
+     * <p>与云端配置无关：这里只读本地 SharedPreferences，不做任何网络/授权判断。</p>
+     */
+    static {
+        try {
+            earlyLoadPrivacy();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean sPrivacyRetryNeeded = true;
+
+    private static void earlyLoadPrivacy() {
+        try {
+            Class<?> xlApp = Class.forName("net.xuele.android.core.common.XLApp");
+            Object app = xlApp.getMethod("get").invoke(null);
+            if (app instanceof android.content.Context) {
+                init((android.content.Context) app);
+                sPrivacyRetryNeeded = !sPrivacySynced;
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 隐私配置兜底同步：第一次没拿到 Application 时，后续任何一次请求都会重试一次 */
+    public static void ensurePrivacySynced() {
+        if (sPrivacySynced && !sPrivacyRetryNeeded) return;
+        if (!sPrivacySynced) {
+            syncFromPrefs();
+        }
+        if (!sPrivacySynced) {
+            earlyLoadPrivacy();
+        }
+        sPrivacyRetryNeeded = !sPrivacySynced;
+    }
+
     private static void syncFromPrefs() {
         SharedPreferences p = p();
         if (p == null) return;
@@ -233,8 +275,23 @@ public class XLModConfig {
     // 1 = 原始媒体扩展名（mp4/mov 等，兼容性优先，但服务端会照常把 1080p 源转码）
     //     非视频文件（文档 ppt/pdf/doc/zip 等）不走这条媒体伪装分支，始终保留自身扩展名。
     // 键名带 _v2：避免旧版本存下的值（曾一度默认成"媒体文件"）继续生效
+    /**
+     * 上传扩展名：0 = bin（伪装扩展名，云原片用），1 = 媒体文件（原扩展名，默认）。
+     *
+     * <p>一次性迁移（V4.1c）：早期版本默认是 bin，导致普通上传也丢掉媒体扩展名；
+     * 现在默认改为"媒体文件"，对老用户也强制迁移一次（之后仍可在面板手动选回 bin）。</p>
+     */
     public static int getHwUploadExtMode() {
-        return i("hw_upload_ext_mode_v2", 0);
+        try {
+            if (!b("hw_ext_default_v3", false)) {
+                wb("hw_ext_default_v3", true);
+                wi("hw_upload_ext_mode_v2", 1);
+                logAppend("[压缩] 上传扩展名默认值迁移为「媒体文件（原扩展名）」");
+                return 1;
+            }
+        } catch (Throwable ignored) {
+        }
+        return i("hw_upload_ext_mode_v2", 1);
     }
 
     public static void setHwUploadExtMode(int v) {
@@ -577,6 +634,15 @@ public class XLModConfig {
             }
         } catch (Throwable t) {
         }
+    }
+
+    /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
+    public static boolean isPrivacyHideModel() {
+        return b("privacy_hide_model", true);
+    }
+
+    public static void setPrivacyHideModel(boolean v) {
+        wb("privacy_hide_model", v);
     }
 
     public static String getPrivacyDeviceId() {

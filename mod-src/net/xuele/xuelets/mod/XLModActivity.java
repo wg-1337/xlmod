@@ -279,32 +279,22 @@ public class XLModActivity extends Activity {
             }
         });
         addCardGated(content, cardCompress, gCloud);
-        tipGated(content, gCloud, "大于 10MB 的视频才会压缩。懒得调就点上面的「一键套用成功配方」，其余保持默认。");
+        tipGated(content, gCloud, "大于 10MB 的视频才会压缩：\n· 想保持原画质 → 打开「云端保持原片」（它会跳过本地压缩，并把容器宽高伪装成 720P）；此时上传扩展名会自动用 bin，绕过服务端转码。\n· 想让视频在软件内正常播放 → 保持「上传扩展名 = 媒体文件」（默认），云原片关掉。\n· 「压缩模式」不选就是原版行为，选「固定档位 / 自定义码率」才按你的设置压。");
 
         LinearLayout cardCloudKeep = card();
         switchRow(cardCloudKeep,
                 "云端保持原片（头部伪装：假装已压缩）",
                 XLModConfig.isCloudKeepOriginal(),
                 new View.OnClickListener() { public void onClick(View v) { XLModConfig.setCloudKeepOriginal(((MiuixSwitch) v).isChecked()); } });
-        actionButton(cardCloudKeep, "一键套用成功配方（不压缩 + 容器伪装 + bin 扩展名）", true, new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                XLModConfig.setCompressMode(1);          // 走"云端保持原片"分支
-                XLModConfig.setCloudKeepOriginal(true);  // 开启云原片（跳过本地压缩 + 头部伪装）
-                XLModConfig.setHwUploadExtMode(0);       // 0 = bin 伪装扩展名
-                Toast.makeText(XLModActivity.this, "已套用：不压缩 + 云端保持原片 + bin 扩展名（重进本页可看到开关状态）", Toast.LENGTH_LONG).show();
-                XLModConfig.logAppend("[云原片] 已一键套用成功配方: compressMode=1, cloudKeepOriginal=on, uploadExt=bin");
-            }
-        });
         addCardGated(content, cardCloudKeep, gCloud);
         // 上传扩展名：bin 伪装 / 原始媒体扩展名（云原片开启时强制 bin，不受本项影响）
         LinearLayout cardUploadExt = card();
-        spinnerRow(cardUploadExt, "上传扩展名（云原片开启时强制 bin）",
-                new String[]{"bin（伪装扩展名，云原片用这个）", "媒体文件（原扩展名；仅云原片关闭时生效）"},
+        spinnerRow(cardUploadExt, "上传扩展名（默认：媒体文件）",
+                new String[]{"bin（伪装扩展名；云原片开启时用它）", "媒体文件（原扩展名，默认）"},
                 XLModConfig.getHwUploadExtMode() == 1 ? 1 : 0,
                 new SpinnerWatcher() { public void onPos(int pos) { XLModConfig.setHwUploadExtMode(pos); } });
         addCardGated(content, cardUploadExt, gCloud);
-        tipGated(content, gCloud, "生效三要素：开关打开 + 扩展名 bin + 不重编码 —— 点「一键套用成功配方」会自动设好。");
+        tipGated(content, gCloud, "生效三要素：①开关打开 ②上传扩展名用 bin（云原片开启时会自动用 bin）③本地不重编码。\n开启后请在「压缩模式」里选「不压缩（原始文件上传）」，或保持「原版行为」但不要选固定档位/自定义码率。\n验证是否绕过：上传后看视频下载链接 —— `<md5>.mp4` = 成功；`mp4_<md5>.mp4` = 被服务端转码了。");
         // 醒目提示：不同设备/系统/厂商对系统库阉割可能导致伪装视频无法在软件内播放
         TextView warn = new TextView(this);
         warn.setText("注意：由于某些设备某些系统某些厂家对系统库进行了阉割，所以导致伪装过的视频无法在软件内播放，现已完成发作业功能，建议搭配使用。");
@@ -657,12 +647,18 @@ public class XLModActivity extends Activity {
         tipGated(content, gAnswer, "答案来源：①本地题目标记 ②判题接口 ③详情接口，三窗调试可对比。\n口语题无法自动作答；英语听力已修复自动回填。");
 
         // ===== 隐私隐藏 =====
-        boolean gPrivacy = addGroupHeaderGated(content, "隐私隐藏", "privacy");
+        // 隐私隐藏：本地功能，不受云端配置影响（不用 addGroupHeaderGated）
+        boolean gPrivacy = true;
+        addGroupHeader(content, "隐私隐藏（本地功能，始终可用）");
         LinearLayout cardPrivacy = card();
         spinnerRow(cardPrivacy, "设备ID模式",
                 new String[]{"关闭（原样上报）", "空值（去除设备ID标识）", "自定义值"},
                 Math.min(2, Math.max(0, XLModConfig.getPrivacyMode())),
                 new SpinnerWatcher() { public void onPos(int pos) { XLModConfig.setPrivacyMode(pos); } });
+        switchRow(cardPrivacy,
+                "同时清空机型/系统版本（请求头 phoneModel / systemVersion）",
+                XLModConfig.isPrivacyHideModel(),
+                new View.OnClickListener() { public void onClick(View v) { XLModConfig.setPrivacyHideModel(((MiuixSwitch) v).isChecked()); } });
         EditText etPrivacy = inputRow(cardPrivacy, "自定义值", XLModConfig.getPrivacyDeviceId(), ++rowId);
         final EditText fEtPrivacy = etPrivacy;
         etPrivacy.addTextChangedListener(new SimpleWatcher() {
@@ -672,7 +668,7 @@ public class XLModActivity extends Activity {
             }
         });
         addCardGated(content, cardPrivacy, gPrivacy);
-        tipGated(content, gPrivacy, "伪装请求里的 deviceId（MD5(androidId+IMEI+机型) 或安装 UUID）。\n注意：登录发生在启动早期，改完请重启 App 再登录。");
+        tipGated(content, gPrivacy, "开启后：每个请求的请求头都会按当前设置改写——deviceId 置空或改成自定义值，并把机型（phoneModel）与系统版本（systemVersion）清空；改开关立刻生效，不用重启 App。\n说明：登录/切角色/信息同步用的 deviceId（MD5(androidId+IMEI+机型)）同样被替换；但极光/友盟/高德等第三方 SDK 会自行采集设备信息上报，不经过本 App 的请求头，那部分无法通过这里屏蔽。");
 
         // ===== 日志 =====
         boolean gLogs = addGroupHeaderGated(content, "日志", "logs");
