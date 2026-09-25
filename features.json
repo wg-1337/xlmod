@@ -6,7 +6,7 @@
   "notice": "欢迎使用 XLMod V4.1p。本软件无任何群聊，请注意辨别。另外xlmod不会收集个人信息，请放心使用",
   "features": {
     "identity": true,
-    "teacher_tools": false,
+    "teacher_tools": true,
     "cloud_keep": true,
     "notify_recall": true,
     "homework": true,
