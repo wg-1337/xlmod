@@ -2837,6 +2837,10 @@ public class XLModHelper {
                 injectSkip("发作业修复开关未开启（发布前补课时/拉题）");
                 return;
             }
+            if (XLModConfig.isHwNoLesson()) {
+                XLModConfig.logAppend("[注入] 已选择「不注入（课外作业）」→ 跳过课时与题目注入（按原版流程发布）");
+                return;
+            }
             JSONObject lesson = firstCapturedLesson(currentJson());
             if (lesson == null) {
                 XLModConfig.logAppend("[注入] 无可用课时（先抓课本/课时）");
@@ -2887,6 +2891,10 @@ public class XLModHelper {
             if (fragment == null) return;
             if (!XLModConfig.isHwFixEnabled()) {
                 injectSkip("发作业修复开关未开启（课本/课时注入）");
+                return;
+            }
+            if (XLModConfig.isHwNoLesson()) {
+                XLModConfig.logAppend("[注入] 已选择「不注入（课外作业）」→ 不改课本/课时（班级照常注入）");
                 return;
             }
             Object param = fieldObj(fragment, "mAssignWorkParam");
@@ -3156,6 +3164,7 @@ public class XLModHelper {
     /** 取抓取数据里第一个可用课时（带所属课本的 subject/grade） */
     private static JSONObject firstCapturedLesson(JSONObject root) {
         try {
+            if (XLModConfig.isHwNoLesson()) return null;   // 面板选了「不注入（课外作业）」
             JSONArray bs = root.optJSONArray("books");
             if (bs == null) return null;
             String prefer = XLModConfig.getHwUseLessonId();
@@ -3203,6 +3212,7 @@ public class XLModHelper {
     /** 后台预取题目（不阻塞主线程）；同一课时 60 秒内不重复 */
     public static void prefetchQuestions(final String lessonId, final int count) {
         try {
+            if (XLModConfig.isHwNoLesson()) return;        // 课外作业模式：不预拉题目
             if (lessonId == null || lessonId.isEmpty()) return;
             if (lessonId.equals(sPrefetchedLesson) && sPrefetchedQs != null
                     && System.currentTimeMillis() - sPrefetchedAt < 60000) return;
@@ -3429,6 +3439,48 @@ public class XLModHelper {
             return 1;
         } catch (Throwable t) {
             return 0;
+        }
+    }
+
+    /**
+     * 隐私隐藏（核心）：在每个请求发出前，改写 HeaderInterceptor 里那张请求头 map。
+     *
+     * <p>为什么必须在这里做：{@code HeaderInterceptor.defaultHeaders()} 在**对象构造时**就把
+     * {@code phoneModel=Build.MODEL}、{@code systemVersion=Build.VERSION.RELEASE} 写死进 map；
+     * 而 {@code deviceId} 是 {@code XLApplication} 启动时用 {@code DeviceUtil.getInstallId()} 写入的。
+     * 这两处都不会再看运行时开关 → 只在 getDeviceId()/getInstallId() 里做隐私处理根本挡不住。
+     * 挂在 intercept() 上则每请求都按**当前**设置重算，改开关立即生效、无需重启。</p>
+     */
+    public static void sanitizeHeaders(Object interceptor) {
+        try {
+            XLModConfig.ensurePrivacySynced();      // 隐私配置兜底同步（与云端配置无关，只读本地）
+            int mode = XLModConfig.getPrivacyMode();
+            if (mode == 0) return;
+            Object v = fieldObj(interceptor, "headers");
+            if (!(v instanceof java.util.Map)) return;
+            java.util.Map map = (java.util.Map) v;
+            String dev = (mode == 1) ? "" : XLModConfig.getPrivacyDeviceId();
+            if (dev == null) dev = "";
+            map.put("deviceId", dev);
+            boolean hideModel = XLModConfig.isPrivacyHideModel();
+            if (hideModel) {
+                map.put("phoneModel", "");
+                map.put("systemVersion", "");
+            }
+            logPrivacyOnce("[隐私] 请求头已改写: deviceId=" + (dev.isEmpty() ? "(空)" : "(自定义值)")
+                    + (hideModel ? " phoneModel/systemVersion=(空)" : "（保留机型/系统版本）"));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static String sLastPrivacyLog = "";
+
+    private static void logPrivacyOnce(String msg) {
+        try {
+            if (msg == null || msg.equals(sLastPrivacyLog)) return;
+            sLastPrivacyLog = msg;
+            XLModConfig.logAppend(msg);
+        } catch (Throwable ignored) {
         }
     }
 

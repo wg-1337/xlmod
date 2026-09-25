@@ -42,7 +42,7 @@ import java.io.FileWriter;
 public class XLModActivity extends Activity {
 
     /** 面板版本号（页面标题后展示） */
-    private static final String MOD_VER = "V4.1p";
+    private static final String MOD_VER = "v4.2p";
 
     // Miuix / MIUI 风格色板
     private static final int C_BG     = 0xFFF4F5F7;
@@ -385,6 +385,7 @@ public class XLModActivity extends Activity {
         // ---------- ② 教材与课时 ----------
         sectionLabel(cardHwFix, "② 教材与课时（课本自己选，课时单独读）");
         tipGated(cardHwFix, gHw, "抓课本：①「打开教材页」→ ②按顺序点 学科 → 年级 → 教材版本 → ③回面板「读取课本」→ ④在「课本」里选一本 → ⑤「读取课时」→ 在「课时」里选要用的课时。\n课本和课时各读一次即可，之后一直有效。");
+tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉选成第一项「不注入（课外作业）」即可——班级照常注入，但不会改课本/课时、也不自动拉题，按原版流程发布。");
         actionButton(cardHwFix, "打开教材页（选学科 / 年级 / 教材版本）", true, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -465,20 +466,37 @@ public class XLModActivity extends Activity {
             @Override
             public void onClick(View v) { XLModHelper.captureLessons(XLModActivity.this); refreshHwStatus(); }
         });
+        // 课时下拉：第 0 项固定为「不注入（课外作业）」，其余为抓到的课时
+        final java.util.List<String> lsIdsAll = new java.util.ArrayList<>();
+        final java.util.List<String> lsNamesAll = new java.util.ArrayList<>();
+        lsIdsAll.add("");
+        lsNamesAll.add("不注入（课外作业）");
+        lsIdsAll.addAll(lsIds);
+        lsNamesAll.addAll(lsNames);
         final String[] chosenLesson = {XLModConfig.getHwUseLessonId()};
-        int lsIdx = 0;
-        for (int i = 0; i < lsIds.size(); i++) {
-            if (lsIds.get(i).equals(chosenLesson[0])) { lsIdx = i; break; }
+        int lsIdx = XLModConfig.isHwNoLesson() ? 0 : 0;
+        if (!XLModConfig.isHwNoLesson()) {
+            for (int i = 1; i < lsIdsAll.size(); i++) {
+                if (lsIdsAll.get(i).equals(chosenLesson[0])) { lsIdx = i; break; }
+            }
         }
-        spinnerRow(cardHwFix, "课时（注入/发布使用）",
-                lsNames.isEmpty() ? new String[]{"（未读到课时）"} : lsNames.toArray(new String[0]), lsIdx,
+        spinnerRow(cardHwFix, "课时（不注入 = 发布课外作业）",
+                lsNamesAll.toArray(new String[0]), lsIdx,
                 new SpinnerWatcher() {
                     public void onPos(int pos) {
-                        if (pos >= 0 && pos < lsIds.size()) {
-                            XLModConfig.setHwUseLessonId(lsIds.get(pos));
-                            chosenLesson[0] = lsIds.get(pos);
-                            XLModHelper.prefetchQuestions(lsIds.get(pos), XLModConfig.getHwQCount());
-                            Toast.makeText(XLModActivity.this, "已选用课时：" + lsNames.get(pos), Toast.LENGTH_SHORT).show();
+                        if (pos == 0) {
+                            XLModConfig.setHwNoLesson(true);
+                            Toast.makeText(XLModActivity.this, "已选择：不注入课本/课时（发布课外作业）", Toast.LENGTH_SHORT).show();
+                            XLModConfig.logAppend("[注入] 面板选择「不注入（课外作业）」");
+                            return;
+                        }
+                        XLModConfig.setHwNoLesson(false);
+                        int i = pos - 1;
+                        if (i >= 0 && i < lsIds.size()) {
+                            XLModConfig.setHwUseLessonId(lsIds.get(i));
+                            chosenLesson[0] = lsIds.get(i);
+                            XLModHelper.prefetchQuestions(lsIds.get(i), XLModConfig.getHwQCount());
+                            Toast.makeText(XLModActivity.this, "已选用课时：" + lsNames.get(i), Toast.LENGTH_SHORT).show();
                         }
                     }
                 });

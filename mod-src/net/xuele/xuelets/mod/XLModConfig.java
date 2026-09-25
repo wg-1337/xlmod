@@ -562,6 +562,18 @@ public class XLModConfig {
         ws("hw_use_book_id", v == null ? "" : v.trim());
     }
 
+    /**
+     * 不注入课本/课时：开启后布置作业页保持"课外作业"形态（不改 lessonId/bookId、不自动拉题）。
+     * 面板「课时」下拉的第一项「不注入（课外作业）」写入此开关；班级注入不受影响。
+     */
+    public static boolean isHwNoLesson() {
+        return b("hw_no_lesson", false);
+    }
+
+    public static void setHwNoLesson(boolean v) {
+        wb("hw_no_lesson", v);
+    }
+
     /** 一键发作业的题目数量 */
     public static int getHwQCount() {
         return i("hw_q_count", 5);
