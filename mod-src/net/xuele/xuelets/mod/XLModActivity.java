@@ -42,7 +42,7 @@ import java.io.FileWriter;
 public class XLModActivity extends Activity {
 
     /** 面板版本号（页面标题后展示） */
-    private static final String MOD_VER = "V4.0";
+    private static final String MOD_VER = "V4.1p";
 
     // Miuix / MIUI 风格色板
     private static final int C_BG     = 0xFFF4F5F7;
