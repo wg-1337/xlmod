@@ -18,7 +18,7 @@ import shutil
 
 SRC_DIR = os.path.join("mod-src", "net", "xuele", "xuelets", "mod")
 DST_DIR = os.path.join("obf-src", "net", "xuele", "xuelets", "mod")
-FILES = ["XLModConfig.java", "XLModFeatures.java", "XLModHelper.java", "XLModActivity.java"]
+FILES = ["XLModConfig.java", "XLModFeatures.java", "XLModHelper.java", "XLModActivity.java", "XLModUpdate.java"]
 # 多 dex 互锁：密钥由 Guard8/Guard9 运行期推导，构建期用 build_guard.py 实跑取值写入 guard-key.txt
 def _load_key():
     try:

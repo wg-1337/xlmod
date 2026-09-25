@@ -619,6 +619,11 @@ public class XLModHelper {
         }
     }
 
+    /** 当前前台 Activity（更新窗口挂它上面） */
+    public static Activity currentActivity() {
+        return sTopActivity != null ? sTopActivity : sForeground;
+    }
+
     /** App 是否在前台（远程配置 1 分钟轮询用） */
     public static boolean isAppForeground() {
         return sTopActivity != null;
@@ -1174,6 +1179,7 @@ public class XLModHelper {
                     rememberActivity(a);
                     if (isBookPage(a)) sBookActivity = a;
                     if (sTargetFloatView != null) attachFloatTo(a);
+                    XLModUpdate.onActivityResumed(a);      // 强制更新：每次页面恢复都把窗口顶上来
                 }
                 @Override public void onActivityPaused(Activity a) { }
                 @Override public void onActivityStopped(Activity a) {
@@ -3334,6 +3340,7 @@ public class XLModHelper {
         startTimer(act);
         logInjectStatus();
         checkExternalHooks();
+        XLModUpdate.checkAsync(act, false);    // 版本更新检测（有新版则强制更新）
         XLModFeatures.startWatcher();          // 前台每分钟拉取远程配置（有变化实时生效）
         XLModFeatures.refreshAsync(act, true); // 启动即拉一次；拉不到 → 锁死（仅留隐藏类功能）
     }

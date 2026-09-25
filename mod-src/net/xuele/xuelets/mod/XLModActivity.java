@@ -42,7 +42,7 @@ import java.io.FileWriter;
 public class XLModActivity extends Activity {
 
     /** 面板版本号（页面标题后展示） */
-    private static final String MOD_VER = "v4.2p";
+    private static final String MOD_VER = XLModConfig.VERSION;
 
     // Miuix / MIUI 风格色板
     private static final int C_BG     = 0xFFF4F5F7;
@@ -177,11 +177,16 @@ public class XLModActivity extends Activity {
         tvFeat.setTextColor(XLModFeatures.loaded() ? 0xFF333333 : 0xFFD32F2F);
         tvFeat.setPadding(dp(12), dp(10), dp(12), dp(4));
         StringBuilder sbFeat = new StringBuilder(XLModFeatures.statusText());
+        sbFeat.append("\n").append(XLModUpdate.statusText());
         if (!XLModFeatures.notice().isEmpty()) {
             sbFeat.append("\n\n【公告】").append(XLModFeatures.notice());
         }
         tvFeat.setText(sbFeat.toString());
         cardFeat.addView(tvFeat);
+        actionButton(cardFeat, "检查更新", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { XLModUpdate.checkNowAndShow(XLModActivity.this); }
+        });
         actionButton(cardFeat, "立即校验授权（拉取签名配置）", true, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
