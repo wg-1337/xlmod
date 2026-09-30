@@ -36,3 +36,16 @@ Thumbs.db
 # 私钥（绝不提交）
 keys/*_private.pem
 keys/*.key
+# 授权主密钥 / 管理员密码（绝不提交：仓库里只放密文 license.json）
+keys/license_key.txt
+keys/admin_pw.txt
+# 本地明文授权配置（V4.3p 起只上传加密后的 license.json）
+features.json
+features.json.sig
+features.json.sha256
+# 本地临时文件
+_seal_*.bin
+_seal_*.sig
+_remote_license.json
+_bz.*
+__pycache__/

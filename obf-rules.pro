@@ -39,6 +39,7 @@
     void autoOnSubjectsFail(android.app.Activity);
     void ensureInit(android.app.Activity);
     java.lang.String cleanDeviceInfo(java.lang.String);
+    void sanitizeHeaders(java.lang.Object);
     void addSettingEntry(android.app.Activity, android.view.View);
     int autoHandleQuotaExhausted();
     int autoHandleFetchFail();

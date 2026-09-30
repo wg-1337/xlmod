@@ -3646,6 +3646,11 @@ public class XLModHelper {
             }
             if (sAutoSubjects == null) sAutoSubjects = subs.toArray(new String[0]);
             trace("自动打榜: 首页探测学科数=" + subs.size() + (subs.isEmpty() ? "" : " 首个=" + subs.get(0)));
+            // V4.3p：探测到的学科登记到本地（面板据此列出"每次要打的学科"勾选项）
+            try {
+                XLModConfig.addKnownSubjects(subs.toArray(new String[0]));
+            } catch (Throwable ignored) {
+            }
             if (subs.isEmpty()) {
                 sAutoSubjects = parseSubjects(XLModConfig.getChallengeSubjects());
                 trace("自动打榜: 首页列表为空，回退手动列表=" + (sAutoSubjects.length));
@@ -3687,15 +3692,54 @@ public class XLModHelper {
                 trace("自动打榜: 无学科可打，今日放弃");
                 return;
             }
+            // V4.3p：只打"面板勾选的学科"（未勾选 = 不限制，沿用探测到的全部学科）
+            subs = filterSubjectsBySelection(subs);
+            if (subs.length == 0) {
+                trace("自动打榜: 勾选的学科一个都不在可用列表里，今日放弃");
+                return;
+            }
             sAutoSubjects = subs;
             sAutoSubjectIdx = 0;
             sAutoBattlesThisSubject = 0;
             sAutoStep = 1;
             sFetchFailCount = 0;
             syncAutoActive();
-            trace("自动打榜: 启动 学科=" + subs[0] + " 列表=" + subs.length);
+            trace("自动打榜: 启动 学科=" + subs[0] + " 列表=" + subs.length
+                    + "（勾选=" + (XLModConfig.getChallengeSelectedSubjects().isEmpty()
+                    ? "全部" : XLModConfig.getChallengeSelectedSubjects()) + "）");
             launchRank(act, subs[0]);
         } catch (Throwable t) {
+        }
+    }
+
+    /**
+     * V4.3p：按面板勾选过滤学科（"每次要打的学科"）。
+     * 勾选为空 → 原样返回（不限制）；勾选不为空但交集为空 → 用勾选本身（此时说明首页没探测到，仍按用户意愿试）。
+     */
+    private static String[] filterSubjectsBySelection(String[] subs) {
+        try {
+            String sel = XLModConfig.getChallengeSelectedSubjects();
+            if (sel == null || sel.trim().isEmpty() || subs == null) return subs;
+            java.util.LinkedHashMap<String, String> pick = XLModConfig.parseSubjectMap(sel);
+            if (pick.isEmpty()) return subs;
+            java.util.ArrayList<String> out = new java.util.ArrayList<String>();
+            for (String s : subs) {
+                if (s == null) continue;
+                String[] kv = s.split(":", 2);
+                if (kv.length == 0 || kv[0].trim().isEmpty()) continue;
+                if (pick.containsKey(kv[0].trim())) out.add(s);
+            }
+            if (out.isEmpty()) {
+                trace("自动打榜: 探测到的学科里没有勾选项，按勾选列表执行");
+                java.util.ArrayList<String> only = new java.util.ArrayList<String>();
+                for (java.util.Map.Entry<String, String> e : pick.entrySet()) {
+                    only.add(e.getKey() + ":" + (e.getValue() == null ? e.getKey() : e.getValue()));
+                }
+                return only.toArray(new String[0]);
+            }
+            return out.toArray(new String[0]);
+        } catch (Throwable t) {
+            return subs;
         }
     }
 
@@ -3716,6 +3760,24 @@ public class XLModHelper {
         }
     }
 
+    /**
+     * V4.3p：登记"本局学科"（金榜题名页 Intent 参数）——自动打榜与手动打榜都会记录，
+     * 面板据此列出"每次要打的学科"勾选项；没有 subject_id 时静默跳过。
+     */
+    private static void noteSubjectFromRank(Activity act) {
+        try {
+            if (act == null) return;
+            android.content.Intent it = act.getIntent();
+            if (it == null) return;
+            String sid = it.getStringExtra(net.xuele.xuelets.challenge.activity.ChallengeRankActivity.PARAM_SUBJECT_ID);
+            String sname = it.getStringExtra(net.xuele.xuelets.challenge.activity.ChallengeRankActivity.PARAM_SUBJECT_NAME);
+            if (sid == null || sid.trim().isEmpty()) return;
+            XLModConfig.addKnownSubject(sid, sname);
+            XLModConfig.setLastBattleSubject(sid, sname);
+        } catch (Throwable t) {
+        }
+    }
+
     private static void launchRank(Activity act, String subjectEntry) {
         try {
             String[] kv = subjectEntry.split(":", 2);
@@ -3724,7 +3786,8 @@ public class XLModHelper {
             // 基类 ChallengeRankActivity 的 initHeadView 不加载头部，直接启动会因找不到月份视图 NPE
             android.content.Intent i = new android.content.Intent(act, net.xuele.xuelets.challenge.activity.ChallengeStudentRankActivity.class);
             i.putExtra(net.xuele.xuelets.challenge.activity.ChallengeRankActivity.PARAM_SUBJECT_ID, kv[0].trim());
-            i.putExtra("subject_name", kv.length > 1 ? kv[1].trim() : kv[0].trim());
+            i.putExtra(net.xuele.xuelets.challenge.activity.ChallengeRankActivity.PARAM_SUBJECT_NAME,
+                    kv.length > 1 ? kv[1].trim() : kv[0].trim());
             // 从当前 activity 启动（会压在 MainActivity 之上）
             act.startActivity(i);
         } catch (Throwable t) {
@@ -3735,6 +3798,8 @@ public class XLModHelper {
     public static void autoOnRankResume(final Activity act) {
         try {
             if (!XLModConfig.isAutoChallenge()) return;
+            // V4.3p：无论是否自动打榜，进榜页就把本页学科登记下来（手动打也会记录）
+            noteSubjectFromRank(act);
             if (sAutoStep != 1) return;
             syncAutoActive();
             trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + XLModConfig.getBattlesPerSubject());
@@ -4003,6 +4068,18 @@ public class XLModHelper {
     public static void claimBattleCloudAfterResult(Activity act, String challengeId, String monthSubject) {
         XLModConfig.init(act);
         autoResultExit(act);
+        // V4.3p：记录本局学科（monthSubject = yyyyMM + subjectId）并落盘题库
+        try {
+            if (monthSubject != null && monthSubject.trim().length() > 6) {
+                String sid = monthSubject.trim().substring(6);
+                if (sid.length() <= 3) {
+                    XLModConfig.addKnownSubject(sid, "");
+                    XLModConfig.setLastBattleSubject(sid, "");
+                }
+            }
+            XLModBank.save(false);
+        } catch (Throwable ignored) {
+        }
         try {
             if (challengeId == null || challengeId.isEmpty()) return;
             if (monthSubject == null || monthSubject.isEmpty()) return;
@@ -4020,8 +4097,9 @@ public class XLModHelper {
                                     }
                                 });
             }
-            // 2) 赛后采集全部答案 → 本地知识库（普通挑战下一局自动作答用）
-            if (XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat()) {
+            // 2) 赛后采集全部答案 → 本地知识库 + 题库（普通挑战下一局自动作答用）
+            if (XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat()
+                    || XLModConfig.isDebugFloat() || XLModBank.enabled()) {
                 harvestAnswers(act, challengeId, monthSubject);
             }
         } catch (Throwable t) {
@@ -4045,6 +4123,11 @@ public class XLModHelper {
                                 for (M_ChallengeQuestion q : list) {
                                     if (q == null || q.questionId == null || q.questionId.isEmpty()) continue;
                                     sDetailMap.put(q.questionId, q);
+                                    // V4.3p：详情数据整题入库（含正确答案文本/填空文本）
+                                    try {
+                                        XLModBank.harvestQuestion(q, "detail");
+                                    } catch (Throwable ignored) {
+                                    }
                                     java.util.List<AnswersBean> ans = q.answers;
                                     if (ans == null) continue;
                                     if (parseQType(q) == 3) {
@@ -4141,7 +4224,11 @@ public class XLModHelper {
         if (!XLModConfig.isAutoAnswer()) return ua;
         if (ua == null || q == null) return ua;
         try {
-            // 0) 知识库（赛后采集）优先——普通挑战实时数据无答案标记
+            // 0) 题库（同学对战采集）优先——普通挑战与对战选项顺序不同，题库按"正确答案文本"重排
+            if (q.questionId != null && !q.questionId.isEmpty() && XLModBank.apply(q.questionId, q, ua)) {
+                return ua;
+            }
+            // 0.1) 旧知识库（赛后详情采集）兼容路径
             if (q.questionId != null && !q.questionId.isEmpty() && applyKb(q.questionId, q, ua)) {
                 return ua;
             }
@@ -4243,7 +4330,11 @@ public class XLModHelper {
                 }
             }
             if (q.answers == null) return ua;
-            // 1) 知识库（赛后采集）优先
+            // 1) 题库（同学对战采集）优先：按正确答案文本匹配当前题目的选项顺序
+            if (!qid.isEmpty() && XLModBank.apply(qid, q, ua)) {
+                return ua;
+            }
+            // 1.1) 旧知识库（赛后详情采集）兼容路径
             if (!qid.isEmpty() && applyKb(qid, q, ua)) {
                 return ua;
             }
@@ -4488,6 +4579,26 @@ public class XLModHelper {
         XLModConfig.init(act);
         autoOnQuestionShown(act);
         if (act == null || ph == null) return;
+        // ===== V4.3p：记录对战学科 + 同学对战整题入库（题库）=====
+        // 放在这里的原因：onQuestionShowed 是"每题显示"的唯一入口，此时
+        //   · ph.mHelper.subjectId/subjectName 就是本局学科 → 用于"每次要打的学科"回填；
+        //   · 同学对战的本地数据带完整 isCorrect 正确答案 → 正是题库要采集的内容。
+        try {
+            String sid = "";
+            String sname = "";
+            if (ph.mHelper != null) {
+                sid = ph.mHelper.subjectId == null ? "" : ph.mHelper.subjectId;
+                sname = ph.mHelper.subjectName == null ? "" : ph.mHelper.subjectName;
+            }
+            if (!sid.isEmpty()) {
+                XLModConfig.addKnownSubject(sid, sname);
+                XLModConfig.setLastBattleSubject(sid, sname);
+            }
+            if (ph.isChallengeClassmate) {
+                XLModBank.harvestBattle(ph, sid);
+            }
+        } catch (Throwable t) {
+        }
         // ===== 自动作答复用（与"答案悬浮窗"开关解耦）=====
         // 听力题(51)的答案只能从详情接口拿；而详情拉取原先写在 isShowAnswerFloat() 判断之后，
         // 于是"只开自动作答、不开悬浮窗"时永远拿不到答案 → 提交时输入框是空的。
@@ -4800,6 +4911,7 @@ public class XLModHelper {
                                             if (txt != null && !txt.isEmpty()) {
                                                 sDetailListenText.put(q.questionId, txt);
                                                 XLModConfig.kbPut(q.questionId, "L|" + txt);
+                                                XLModBank.putListen(q.questionId, txt);
                                             }
                                         }
                                     }

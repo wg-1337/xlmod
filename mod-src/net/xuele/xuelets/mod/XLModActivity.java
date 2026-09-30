@@ -197,6 +197,47 @@ public class XLModActivity extends Activity {
         addCard(content, cardFeat);
         tip(content, "授权配置由作者私钥签名，端上只验签（地址写死，无法自建配置解锁）；未通过校验或已过期时，除「隐私隐藏 / 日志」外全部锁定；App 在前台每 1 分钟自动校验，配置有变化立即生效。");
 
+        // ===== 管理员解锁（V4.3p：密码随 license 一起加密下发；本地输入即放行全部功能） =====
+        addGroupHeader(content, "管理员解锁（本地功能）");
+        LinearLayout cardAdmin = card();
+        final TextView tvAdmin = new TextView(this);
+        tvAdmin.setTextSize(12.5f);
+        tvAdmin.setTextColor(XLModConfig.isAdminUnlocked() ? 0xFF07A05A : 0xFF666666);
+        tvAdmin.setPadding(dp(12), dp(10), dp(12), dp(4));
+        tvAdmin.setText(adminStatusText());
+        cardAdmin.addView(tvAdmin);
+        final EditText etAdminPw = inputRow(cardAdmin, "管理员密码", "", ++rowId);
+        etAdminPw.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        actionButton(cardAdmin, "解锁全部功能", true, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String err = XLModFeatures.verifyAdminPassword(etAdminPw.getText().toString());
+                if (err.isEmpty()) {
+                    etAdminPw.setText("");
+                    Toast.makeText(XLModActivity.this, "管理员已解锁：全部功能已放行", Toast.LENGTH_LONG).show();
+                    rebuildUi();
+                } else {
+                    Toast.makeText(XLModActivity.this, "解锁失败：" + err, Toast.LENGTH_LONG).show();
+                    if (!XLModFeatures.adminVerifierReady()) {
+                        XLModFeatures.refreshAsync(XLModActivity.this, true);
+                    }
+                }
+            }
+        });
+        if (XLModConfig.isAdminUnlocked()) {
+            actionButton(cardAdmin, "退出管理员模式（恢复按授权开关）", false, new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    XLModConfig.setAdminUnlocked(false);
+                    Toast.makeText(XLModActivity.this, "已退出管理员模式", Toast.LENGTH_SHORT).show();
+                    rebuildUi();
+                }
+            });
+        }
+        addCard(content, cardAdmin);
+        tip(content, "管理员密码**不在代码里**：它和功能开关一起被 AES-256-CBC 加密进仓库的 license.json（公开仓库里只有密文）。输入正确 → 本机放行全部功能，优先级高于云端开关/熔断/有效期；校验块在第一次成功校验授权后缓存到本机，之后断网也能解锁。");
+
         // ===== 教师身份 =====
         boolean gIdentity = addGroupHeaderGated(content, "教师身份", "identity");
         LinearLayout cardTeacher = card();
@@ -614,6 +655,79 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 XLModConfig.setChallengeSubjects(fEtSubs.getText().toString());
             }
         });
+
+        // ---------- 每次要打的学科（V4.3p） ----------
+        sectionLabel(cardAuto, "每次要打的学科（打过的学科会自动记录，勾选后只打勾选的）");
+        sSubjectStatusView = new TextView(this);
+        sSubjectStatusView.setTextSize(12f);
+        sSubjectStatusView.setTextColor(0xFF4A4F57);
+        sSubjectStatusView.setLineSpacing(dp(2), 1.0f);
+        sSubjectStatusView.setPadding(dp(18), dp(10), dp(18), dp(6));
+        sSubjectStatusView.setText(subjectStatusText());
+        cardAuto.addView(sSubjectStatusView);
+
+        final java.util.LinkedHashMap<String, String> subAll = new java.util.LinkedHashMap<String, String>();
+        try {
+            subAll.putAll(XLModConfig.parseSubjectMap(XLModConfig.getChallengeSubjects()));
+            subAll.putAll(XLModConfig.parseSubjectMap(XLModConfig.getKnownSubjects()));
+        } catch (Throwable ignored) {
+        }
+        final java.util.LinkedHashMap<String, String> picked = new java.util.LinkedHashMap<String, String>();
+        try {
+            picked.putAll(XLModConfig.parseSubjectMap(XLModConfig.getChallengeSelectedSubjects()));
+        } catch (Throwable ignored) {
+        }
+        final java.util.LinkedHashMap<String, android.widget.CheckBox> boxes =
+                new java.util.LinkedHashMap<String, android.widget.CheckBox>();
+        if (subAll.isEmpty()) {
+            sectionLabel(cardAuto, "（还没有可用学科：先打一次对战或点「手动执行一次自动打榜」探测首页）");
+        }
+        for (java.util.Map.Entry<String, String> e : subAll.entrySet()) {
+            final String sid = e.getKey();
+            final String sname = e.getValue() == null ? "" : e.getValue();
+            android.widget.CheckBox cb = new android.widget.CheckBox(this);
+            cb.setText(sid + " · " + sname);
+            cb.setTextSize(14.5f);
+            cb.setTextColor(C_TEXT);
+            cb.setChecked(picked.containsKey(sid));
+            cb.setPadding(dp(12), dp(6), dp(12), dp(6));
+            cb.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override
+                public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                    if (checked) {
+                        picked.put(sid, sname);
+                    } else {
+                        picked.remove(sid);
+                    }
+                    XLModConfig.setChallengeSelectedSubjects(XLModConfig.joinSubjectMap(picked));
+                    XLModConfig.logAppend("[打榜] 学科勾选: " + (picked.isEmpty() ? "全部" : XLModConfig.joinSubjectMap(picked)));
+                    refreshSubjectStatus();
+                }
+            });
+            boxes.put(sid, cb);
+            cardAuto.addView(cb, new LinearLayout.LayoutParams(-1, -2));
+        }
+        actionButton(cardAuto, "全选（所有学科依次打）", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                for (java.util.Map.Entry<String, android.widget.CheckBox> e : boxes.entrySet()) {
+                    e.getValue().setChecked(true);
+                }
+                Toast.makeText(XLModActivity.this, "已全选", Toast.LENGTH_SHORT).show();
+            }
+        });
+        actionButton(cardAuto, "清空勾选 = 不限制（沿用探测到的全部学科）", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                for (java.util.Map.Entry<String, android.widget.CheckBox> e : boxes.entrySet()) {
+                    e.getValue().setChecked(false);
+                }
+                picked.clear();
+                XLModConfig.setChallengeSelectedSubjects("");
+                refreshSubjectStatus();
+                Toast.makeText(XLModActivity.this, "已清空勾选：按探测到的全部学科依次打", Toast.LENGTH_SHORT).show();
+            }
+        });
         addCardGated(content, cardAuto, gChallenge);
         tipGated(content, gChallenge, "到点自动进「同学对战」：自动答题、获胜自动退出，学科打满自动换下一科。\n需要先开启「自动作答」；打榜页出现后请不要手动操作。");
 
@@ -666,8 +780,47 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 "调试：三窗对比（同时显示 本地/接口/详情 三个悬浮窗）",
                 XLModConfig.isDebugFloat(),
                 new View.OnClickListener() { public void onClick(View v) { XLModConfig.setDebugFloat(((MiuixSwitch) v).isChecked()); } });
+        // ---------- 题库（同学对战采集 → 普通挑战作答，V4.3p） ----------
+        sectionLabel(cardChallenge, "题库（同学对战打过的题自动入库）");
+        switchRow(cardChallenge,
+                "普通挑战用题库作答（题目顺序/选项顺序不同也能按正确答案对上）",
+                XLModConfig.isBankEnabled(),
+                new View.OnClickListener() { public void onClick(View v) { XLModConfig.setBankEnabled(((MiuixSwitch) v).isChecked()); refreshBankStatus(); } });
+        sBankStatusView = new TextView(this);
+        sBankStatusView.setTextSize(12f);
+        sBankStatusView.setTextColor(0xFF4A4F57);
+        sBankStatusView.setLineSpacing(dp(2), 1.0f);
+        sBankStatusView.setPadding(dp(18), dp(10), dp(18), dp(6));
+        sBankStatusView.setText(XLModBank.statsText());
+        cardChallenge.addView(sBankStatusView);
+        actionButton(cardChallenge, "导出题库（/sdcard/Download/xlmod_qbank.json）", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String r = XLModBank.exportToFile();
+                Toast.makeText(XLModActivity.this, "已导出：" + r, Toast.LENGTH_LONG).show();
+                refreshBankStatus();
+            }
+        });
+        actionButton(cardChallenge, "清空题库", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                new AlertDialog.Builder(XLModActivity.this)
+                        .setTitle("清空题库")
+                        .setMessage("将删除本机记录的全部对战题目（含正确答案）。确定继续？")
+                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface d, int w) {
+                                XLModBank.clear();
+                                refreshBankStatus();
+                                Toast.makeText(XLModActivity.this, "题库已清空", Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+            }
+        });
         addCardGated(content, cardChallenge, gAnswer);
-        tipGated(content, gAnswer, "答案来源：①本地题目标记 ②判题接口 ③详情接口，三窗调试可对比。\n口语题无法自动作答；英语听力已修复自动回填。");
+        tipGated(content, gAnswer, "答案来源：①题库（同学对战采集）②本地题目标记 ③判题接口 ④详情接口，三窗调试可对比。\n题库只记**正确答案**：普通挑战与同学对战的选项顺序不同，作答时按选项文本把正确答案映射回当前题目。\n口语题无法自动作答；英语听力已修复自动回填。");
 
         // ===== 隐私隐藏 =====
         // 隐私隐藏：本地功能，不受云端配置影响（不用 addGroupHeaderGated）
@@ -765,9 +918,68 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
     protected void onResume() {
         super.onResume();
         refreshHwStatus();
+        refreshSubjectStatus();
+        refreshBankStatus();
     }
 
     private static TextView sHwStatusView = null;
+    private static TextView sSubjectStatusView = null;
+    private static TextView sBankStatusView = null;
+
+    /** 管理员解锁状态文本（V4.3p） */
+    private String adminStatusText() {
+        try {
+            StringBuilder sb = new StringBuilder();
+            if (XLModConfig.isAdminUnlocked()) {
+                sb.append("管理员模式：已解锁（全部功能放行）");
+                long at = XLModConfig.getAdminUnlockAt();
+                if (at > 0) {
+                    sb.append(" · ").append(new java.text.SimpleDateFormat("MM-dd HH:mm")
+                            .format(new java.util.Date(at))).append(" 解锁");
+                }
+            } else {
+                sb.append("管理员模式：未解锁（按授权开关）");
+            }
+            sb.append("\n密码校验块：")
+                    .append(XLModFeatures.adminVerifierReady() ? "已就绪（随授权加密下发）" : "未获取（先校验授权）")
+                    .append(" · 授权形态：")
+                    .append(XLModFeatures.licenseFormat() == 2 ? "加密（仓库只有密文）"
+                            : (XLModFeatures.licenseFormat() == 1 ? "明文签名" : "未取到"));
+            return sb.toString();
+        } catch (Throwable t) {
+            return "管理员状态读取失败: " + t;
+        }
+    }
+
+    /** 打榜学科状态文本（V4.3p）：已记录的学科 + 最近一局学科 + 当前勾选 */
+    private String subjectStatusText() {
+        try {
+            String known = XLModConfig.getKnownSubjects();
+            String last = XLModConfig.getLastBattleSubject();
+            long at = XLModConfig.getLastBattleAt();
+            String when = at > 0 ? new java.text.SimpleDateFormat("MM-dd HH:mm").format(new java.util.Date(at)) : "（暂无）";
+            return "已记录学科：" + (known.isEmpty() ? "（打一次对战/探测一次首页就会记录）" : known)
+                    + "\n最近一局：" + (last.isEmpty() ? "（暂无）" : last) + " · " + when
+                    + "\n本次要打：" + (XLModConfig.getChallengeSelectedSubjects().isEmpty()
+                    ? "不限制（探测到的全部学科）" : XLModConfig.getChallengeSelectedSubjects());
+        } catch (Throwable t) {
+            return "学科状态读取失败: " + t;
+        }
+    }
+
+    private void refreshSubjectStatus() {
+        try {
+            if (sSubjectStatusView != null) sSubjectStatusView.setText(subjectStatusText());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void refreshBankStatus() {
+        try {
+            if (sBankStatusView != null) sBankStatusView.setText(XLModBank.statsText());
+        } catch (Throwable ignored) {
+        }
+    }
 
     /** 发作业板块状态文本（本地数据总览） */
     private String hwStatusText() {

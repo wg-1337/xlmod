@@ -116,6 +116,13 @@ public class XLModConfig {
     /** 本地文件合并节流：init() 会被 5 秒计时器频繁调用，不能每次都读文件+落盘 */
     private static long sLastInitSyncAt = 0;
 
+    /** 应用 Context（题库/日志等需要写私有目录时的兜底；init 时捕获） */
+    private static Context sAppCtx = null;
+
+    public static Context appCtx() {
+        return sAppCtx;
+    }
+
     public static void init(Context context) {
         // 一次性迁移：老版本可能把"发作业修复"存成了 false，这里强制开启一次（之后仍可由面板关闭）
         try {
@@ -130,6 +137,12 @@ public class XLModConfig {
         if (now - sLastInitSyncAt > 30000) {
             sLastInitSyncAt = now;
             syncHwTargetsWithFile();
+        }
+        if (context != null && sAppCtx == null) {
+            try {
+                sAppCtx = context.getApplicationContext();
+            } catch (Throwable ignored) {
+            }
         }
         if (sPrefs == null && context != null) {
             sPrefs = context.getApplicationContext()
@@ -649,7 +662,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.2p";
+    public static final String VERSION = "v4.3p";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -867,6 +880,179 @@ public class XLModConfig {
     public static String kbGet(String key) {
         if (key == null || key.isEmpty()) return "";
         return s("kb_" + key, "");
+    }
+
+    // ============ 管理员解锁（V4.3p） ============
+    // 说明：管理员密码**不在代码里**——它的校验块（PBKDF2 盐+迭代数+哈希）随 license 一起加密下发，
+    // 端上只在内存/本地缓存校验块，输入正确即把本机标记为"管理员已解锁"（全部功能区放行）。
+
+    /** 管理员是否已解锁（本地标记；解锁后不受云端 features/kill/过期影响） */
+    public static boolean isAdminUnlocked() {
+        return b("admin_unlocked", false);
+    }
+
+    public static void setAdminUnlocked(boolean v) {
+        wb("admin_unlocked", v);
+        setAdminUnlockAt(v ? System.currentTimeMillis() : 0L);
+        logAppend("[管理员] 管理员模式 " + (v ? "已解锁（全部功能放行）" : "已退出"));
+    }
+
+    /** 缓存管理员校验块（license 解密成功后写入；断网也能验证） */
+    public static void setAdminVerifier(String saltB64, int iters, String hashB64) {
+        ws("admin_salt", saltB64 == null ? "" : saltB64);
+        wi("admin_iters", iters <= 0 ? 20000 : iters);
+        ws("admin_hash", hashB64 == null ? "" : hashB64);
+    }
+
+    public static String getAdminSalt() {
+        return s("admin_salt", "");
+    }
+
+    public static int getAdminIters() {
+        return i("admin_iters", 20000);
+    }
+
+    public static String getAdminHash() {
+        return s("admin_hash", "");
+    }
+
+    /** 是否有可用于校验的管理员密码块（= license 里的 admin 段是否已拿到） */
+    public static boolean hasAdminVerifier() {
+        return !getAdminSalt().isEmpty() && !getAdminHash().isEmpty();
+    }
+
+    /** 最近一次管理员解锁时间（诊断显示用） */
+    public static long getAdminUnlockAt() {
+        return cfgGetLong("admin_unlock_at", 0L);
+    }
+
+    public static void setAdminUnlockAt(long v) {
+        cfgSetLong("admin_unlock_at", v);
+    }
+
+    // ============ 对战学科记录与"每次要打的学科"（V4.3p） ============
+    // recorded: "id:名称,id:名称"（打对战时/探测首页时自动登记）
+    // selected: "id:名称,..."（面板勾选；空 = 不限制，按探测到的全部学科依次打）
+
+    public static String getKnownSubjects() {
+        return s("known_subjects", "");
+    }
+
+    /** 登记一个学科（幂等）；有变化返回 true */
+    public static boolean addKnownSubject(String id, String name) {
+        try {
+            if (id == null || id.trim().isEmpty()) return false;
+            id = id.trim();
+            String nm = (name == null || name.trim().isEmpty()) ? id : name.trim();
+            java.util.LinkedHashMap<String, String> map = parseSubjectMap(getKnownSubjects());
+            String old = map.get(id);
+            if (nm.equals(old)) return false;
+            map.put(id, nm);
+            ws("known_subjects", joinSubjectMap(map));
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 批量登记（探测首页得到的学科列表） */
+    public static int addKnownSubjects(String[] idNameEntries) {
+        int n = 0;
+        try {
+            if (idNameEntries == null) return 0;
+            for (String e : idNameEntries) {
+                if (e == null) continue;
+                String[] kv = e.split(":", 2);
+                if (kv.length == 0) continue;
+                if (addKnownSubject(kv[0], kv.length > 1 ? kv[1] : kv[0])) n++;
+            }
+        } catch (Throwable ignored) {
+        }
+        return n;
+    }
+
+    public static void setKnownSubjects(String v) {
+        ws("known_subjects", v == null ? "" : v.trim());
+    }
+
+    /** 面板勾选"每次要打的学科"；空字符串 = 全部学科 */
+    public static String getChallengeSelectedSubjects() {
+        return s("challenge_selected_subjects", "");
+    }
+
+    public static void setChallengeSelectedSubjects(String v) {
+        ws("challenge_selected_subjects", v == null ? "" : v.trim());
+    }
+
+    /** 勾选里是否包含某学科 */
+    public static boolean isSubjectSelected(String id) {
+        try {
+            String sel = getChallengeSelectedSubjects();
+            if (sel == null || sel.trim().isEmpty()) return true;   // 未勾选 = 不限制
+            if (id == null) return false;
+            return parseSubjectMap(sel).containsKey(id.trim());
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /** 最近一次对战学科（打完一局后记录） */
+    public static String getLastBattleSubject() {
+        return s("last_battle_subject", "");
+    }
+
+    public static void setLastBattleSubject(String id, String name) {
+        String nm = (name == null || name.trim().isEmpty()) ? "" : name.trim();
+        String v = (id == null ? "" : id.trim()) + (nm.isEmpty() ? "" : (":" + nm));
+        if (v.equals(getLastBattleSubject())) return;
+        ws("last_battle_subject", v);
+        cfgSetLong("last_battle_at", System.currentTimeMillis());
+    }
+
+    public static long getLastBattleAt() {
+        return cfgGetLong("last_battle_at", 0L);
+    }
+
+    /** 学科串解析（"2:数学,1:语文" → LinkedHashMap） */
+    public static java.util.LinkedHashMap<String, String> parseSubjectMap(String line) {
+        java.util.LinkedHashMap<String, String> map = new java.util.LinkedHashMap<String, String>();
+        try {
+            if (line == null || line.trim().isEmpty()) return map;
+            for (String p : line.split(",")) {
+                if (p == null) continue;
+                String t = p.trim();
+                if (t.isEmpty()) continue;
+                String[] kv = t.split(":", 2);
+                String id = kv[0].trim();
+                if (id.isEmpty()) continue;
+                map.put(id, kv.length > 1 && !kv[1].trim().isEmpty() ? kv[1].trim() : id);
+            }
+        } catch (Throwable ignored) {
+        }
+        return map;
+    }
+
+    public static String joinSubjectMap(java.util.Map<String, String> map) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            if (map == null) return "";
+            for (java.util.Map.Entry<String, String> e : map.entrySet()) {
+                if (e.getKey() == null || e.getKey().trim().isEmpty()) continue;
+                if (sb.length() > 0) sb.append(",");
+                sb.append(e.getKey().trim()).append(":").append(e.getValue() == null ? "" : e.getValue().trim());
+            }
+        } catch (Throwable ignored) {
+        }
+        return sb.toString();
+    }
+
+    // ============ 题库（同学对战采集 → 普通挑战作答，V4.3p） ============
+    public static boolean isBankEnabled() {
+        return b("bank_enabled", true);
+    }
+
+    public static void setBankEnabled(boolean v) {
+        wb("bank_enabled", v);
     }
 
     // ============ 签到去重 ============

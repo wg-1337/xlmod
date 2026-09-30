@@ -1,3 +1,6 @@
 * text=auto eol=lf
+# Windows 批处理必须 CRLF（LF 会让 cmd 的行解析/标签跳转出错）
+*.bat text eol=crlf
+*.cmd text eol=crlf
 *.png binary
 *.jpg binary
