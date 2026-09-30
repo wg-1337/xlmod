@@ -3797,9 +3797,9 @@ public class XLModHelper {
     /** 挂点在 ChallengeRankActivity.onCreate 末尾（首次进入）与 onResume（战斗结束返回/跨学科） */
     public static void autoOnRankResume(final Activity act) {
         try {
-            if (!XLModConfig.isAutoChallenge()) return;
-            // V4.3p：无论是否自动打榜，进榜页就把本页学科登记下来（手动打也会记录）
+            // V4.3p：无论自动打榜是否开启，进榜页就把本页学科登记下来（手动打也会记录）
             noteSubjectFromRank(act);
+            if (!XLModConfig.isAutoChallenge()) return;
             if (sAutoStep != 1) return;
             syncAutoActive();
             trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + XLModConfig.getBattlesPerSubject());
