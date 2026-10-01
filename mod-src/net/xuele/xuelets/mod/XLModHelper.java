@@ -4099,6 +4099,20 @@ public class XLModHelper {
                         + XLModConfig.finishStatusCode() + "）");
                 if (finishBattleNow(act)) return;   // 已发起提交：不再答这一题
             }
+            // V4.8q：服务端自己的"最后一题"也要结算 —— 否则题数设得比服务端总题数大时永远不结算
+            if (isServerLastQuestion(act) && !sFinishingBattle) {
+                trace("[题数] 已到服务端最后一题（本局第 " + sAutoQuestionsThisBattle + " 题）→ 答完自动提交结算");
+                final Activity fActL = act;
+                act.getWindow().getDecorView().postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            if (!sFinishingBattle) finishBattleNow(fActL);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }, Math.max(2500, XLModConfig.getChallengeAnswerDelay() + 900));
+            }
             trace("自动打榜: 题目出现，定时提交");
             final int idel = XLModConfig.getChallengeAnswerDelay();
             final boolean[] done = {false};
@@ -4175,6 +4189,23 @@ public class XLModHelper {
     private static int sAutoQuestionsThisBattle = 0;
     /** 已经发起过提前结算，避免重复提交 */
     private static volatile boolean sFinishingBattle = false;
+
+    /**
+     * V4.8q：当前题是不是"服务端定义的最后一题"（{@code mCurrentPosition >= mTotalQuestionCount-1}）。
+     * 到这一题说明服务端不会再给更多题，必须提交才有结算。
+     */
+    private static boolean isServerLastQuestion(Activity act) {
+        try {
+            Object pos = getFieldValue(act, "mCurrentPosition");
+            Object ph = getFieldValue(act, "paramHelper");
+            Object total = getFieldValue(ph, "mTotalQuestionCount");
+            int p = (pos instanceof Integer) ? (Integer) pos : -1;
+            int t = (total instanceof Integer) ? (Integer) total : 0;
+            return p >= 0 && t > 0 && p >= t - 1;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     /**
      * 替用户点宿主自己的「提交成绩」：反射调用

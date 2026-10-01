@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.8p 全部新功能：
+"""验证 V4.8q 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.8p（唯一来源）
+   D1 XLModConfig.VERSION = v4.8q（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -408,7 +408,7 @@ ok(should_finish(11, 10, False) is True, 'I2 第 11 题出现 → 发起提交�
 ok(should_finish(11, 10, True) is False, 'I2 已发起过提交 → 不重复提交')
 
 print("D. 版本与产物")
-ok('VERSION = "v4.8p"' in C, 'D1 XLModConfig.VERSION = v4.8p')
+ok('VERSION = "v4.8q"' in C, 'D1 XLModConfig.VERSION = v4.8p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -437,9 +437,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.8p'), 'D2 APK 内含版本号 v4.8p（密文解回原文）')
+    ok(has('v4.8q'), 'D2 APK 内含版本号 v4.8q（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
