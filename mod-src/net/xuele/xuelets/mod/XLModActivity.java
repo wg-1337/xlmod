@@ -650,7 +650,7 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 } catch (Throwable t) {}
             }
         });
-        EditText etSubs = inputRow(cardAuto, "学科列表(id:名称)", XLModConfig.getChallengeSubjects(), ++rowId);
+        EditText etSubs = inputRow(cardAuto, "手动兜底学科(一般留空)", XLModConfig.getChallengeSubjects(), ++rowId);
         final EditText fEtSubs = etSubs;
         etSubs.addTextChangedListener(new SimpleWatcher() {
             @Override
@@ -659,8 +659,8 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
             }
         });
 
-        // ---------- 每次要打的学科（V4.3p） ----------
-        sectionLabel(cardAuto, "每次要打的学科（打过的学科会自动记录，勾选后只打勾选的）");
+        // ---------- 每次要打的学科（V4.3p）：只列服务器真实返回的学科 ----------
+        sectionLabel(cardAuto, "每次要打的学科（只列服务器实际返回的学科）");
         sSubjectStatusView = new TextView(this);
         sSubjectStatusView.setTextSize(12f);
         sSubjectStatusView.setTextColor(0xFF4A4F57);
@@ -668,71 +668,42 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
         sSubjectStatusView.setPadding(dp(18), dp(10), dp(18), dp(6));
         sSubjectStatusView.setText(subjectStatusText());
         cardAuto.addView(sSubjectStatusView);
-
-        final java.util.LinkedHashMap<String, String> subAll = new java.util.LinkedHashMap<String, String>();
-        try {
-            subAll.putAll(XLModConfig.parseSubjectMap(XLModConfig.getChallengeSubjects()));
-            subAll.putAll(XLModConfig.parseSubjectMap(XLModConfig.getKnownSubjects()));
-        } catch (Throwable ignored) {
-        }
-        final java.util.LinkedHashMap<String, String> picked = new java.util.LinkedHashMap<String, String>();
-        try {
-            picked.putAll(XLModConfig.parseSubjectMap(XLModConfig.getChallengeSelectedSubjects()));
-        } catch (Throwable ignored) {
-        }
-        final java.util.LinkedHashMap<String, android.widget.CheckBox> boxes =
-                new java.util.LinkedHashMap<String, android.widget.CheckBox>();
-        if (subAll.isEmpty()) {
-            sectionLabel(cardAuto, "（还没有可用学科：先打一次对战或点「手动执行一次自动打榜」探测首页）");
-        }
-        for (java.util.Map.Entry<String, String> e : subAll.entrySet()) {
-            final String sid = e.getKey();
-            final String sname = e.getValue() == null ? "" : e.getValue();
-            android.widget.CheckBox cb = new android.widget.CheckBox(this);
-            cb.setText(sid + " · " + sname);
-            cb.setTextSize(14.5f);
-            cb.setTextColor(C_TEXT);
-            cb.setChecked(picked.containsKey(sid));
-            cb.setPadding(dp(12), dp(6), dp(12), dp(6));
-            cb.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
-                @Override
-                public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
-                    if (checked) {
-                        picked.put(sid, sname);
-                    } else {
-                        picked.remove(sid);
-                    }
-                    XLModConfig.setChallengeSelectedSubjects(XLModConfig.joinSubjectMap(picked));
-                    XLModConfig.logAppend("[打榜] 学科勾选: " + (picked.isEmpty() ? "全部" : XLModConfig.joinSubjectMap(picked)));
-                    refreshSubjectStatus();
-                }
-            });
-            boxes.put(sid, cb);
-            cardAuto.addView(cb, new LinearLayout.LayoutParams(-1, -2));
-        }
-        actionButton(cardAuto, "全选（所有学科依次打）", false, new View.OnClickListener() {
+        // 选项容器：内容来自"已读取到的学科配置"，每次进面板/探测完成后重建
+        LinearLayout subBox = new LinearLayout(this);
+        subBox.setOrientation(LinearLayout.VERTICAL);
+        cardAuto.addView(subBox, new LinearLayout.LayoutParams(-1, -2));
+        sSubjectBox = subBox;
+        actionButton(cardAuto, "立即探测学科（读取服务器真实学科配置）", true, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                for (java.util.Map.Entry<String, android.widget.CheckBox> e : boxes.entrySet()) {
-                    e.getValue().setChecked(true);
+                XLModHelper.startSubjectProbe(XLModActivity.this);
+                Toast.makeText(XLModActivity.this, "正在打开金榜题名首页读取学科…读完自动返回", Toast.LENGTH_LONG).show();
+            }
+        });
+        actionButton(cardAuto, "全选（所有读到的学科依次打）", false, new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                java.util.LinkedHashMap<String, String> known = XLModConfig.parseSubjectMap(XLModConfig.getKnownSubjects());
+                if (known.isEmpty()) {
+                    Toast.makeText(XLModActivity.this, "还没有读到学科：先点上面的「立即探测学科」", Toast.LENGTH_LONG).show();
+                    return;
                 }
-                Toast.makeText(XLModActivity.this, "已全选", Toast.LENGTH_SHORT).show();
+                XLModConfig.setChallengeSelectedSubjects(XLModConfig.joinSubjectMap(known));
+                rebuildSubjectRows();
+                Toast.makeText(XLModActivity.this, "已全选 " + known.size() + " 个学科", Toast.LENGTH_SHORT).show();
             }
         });
         actionButton(cardAuto, "清空勾选 = 不限制（沿用探测到的全部学科）", false, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                for (java.util.Map.Entry<String, android.widget.CheckBox> e : boxes.entrySet()) {
-                    e.getValue().setChecked(false);
-                }
-                picked.clear();
                 XLModConfig.setChallengeSelectedSubjects("");
-                refreshSubjectStatus();
+                rebuildSubjectRows();
                 Toast.makeText(XLModActivity.this, "已清空勾选：按探测到的全部学科依次打", Toast.LENGTH_SHORT).show();
             }
         });
+        rebuildSubjectRows();
         addCardGated(content, cardAuto, gChallenge);
-        tipGated(content, gChallenge, "到点自动进「同学对战」：自动答题、获胜自动退出，学科打满自动换下一科。\n需要先开启「自动作答」；打榜页出现后请不要手动操作。");
+        tipGated(content, gChallenge, "到点自动进「同学对战」：自动答题、获胜自动退出，学科打满自动换下一科。\n需要先开启「自动作答」；打榜页出现后请不要手动操作。\n学科配置**只认服务器返回的真实数据**（金榜题名首页/对战页/结果页读到什么就记什么），勾选后只打勾选的；一个都不勾 = 不限制。");
 
         // ===== 云朵助手 =====
         boolean gFlower = addGroupHeaderGated(content, "云朵助手", "cloud_flower");
@@ -921,13 +892,15 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
     protected void onResume() {
         super.onResume();
         refreshHwStatus();
-        refreshSubjectStatus();
+        refreshSubjectOptions();
         refreshBankStatus();
     }
 
     private static TextView sHwStatusView = null;
     private static TextView sSubjectStatusView = null;
     private static TextView sBankStatusView = null;
+    private static LinearLayout sSubjectBox = null;
+    private static String sSubjectRowsFrom = "";
 
     /** 管理员解锁状态文本（V4.3p） */
     private String adminStatusText() {
@@ -952,19 +925,100 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
         }
     }
 
-    /** 打榜学科状态文本（V4.3p）：已记录的学科 + 最近一局学科 + 当前勾选 */
+    /**
+     * 打榜学科状态文本（V4.3p）：**只显示服务器真实返回的学科**（读不到就明确说没读到）。
+     */
     private String subjectStatusText() {
         try {
             String known = XLModConfig.getKnownSubjects();
+            long at = XLModConfig.getKnownSubjectsAt();
+            String when = at > 0 ? new java.text.SimpleDateFormat("MM-dd HH:mm").format(new java.util.Date(at)) : "（还没读到）";
+            java.util.LinkedHashMap<String, String> map = XLModConfig.parseSubjectMap(known);
             String last = XLModConfig.getLastBattleSubject();
-            long at = XLModConfig.getLastBattleAt();
-            String when = at > 0 ? new java.text.SimpleDateFormat("MM-dd HH:mm").format(new java.util.Date(at)) : "（暂无）";
-            return "已记录学科：" + (known.isEmpty() ? "（打一次对战/探测一次首页就会记录）" : known)
-                    + "\n最近一局：" + (last.isEmpty() ? "（暂无）" : last) + " · " + when
-                    + "\n本次要打：" + (XLModConfig.getChallengeSelectedSubjects().isEmpty()
+            StringBuilder sb = new StringBuilder();
+            if (map.isEmpty()) {
+                sb.append("学科配置：**还没读到**（不会用任何猜测的学科）");
+            } else {
+                sb.append("学科配置：已读取 ").append(map.size()).append(" 个（").append(when).append("）\n");
+                StringBuilder names = new StringBuilder();
+                for (java.util.Map.Entry<String, String> e : map.entrySet()) {
+                    if (names.length() > 0) names.append("、");
+                    names.append(e.getValue()).append("(").append(e.getKey()).append(")");
+                }
+                sb.append(names);
+            }
+            sb.append("\n最近一局：").append(last.isEmpty() ? "（暂无）" : last)
+                    .append(" · 探测状态：").append(XLModHelper.isSubjectProbeRunning() ? "读取中…" : "空闲");
+            sb.append("\n本次要打：").append(XLModConfig.getChallengeSelectedSubjects().isEmpty()
                     ? "不限制（探测到的全部学科）" : XLModConfig.getChallengeSelectedSubjects());
+            return sb.toString();
         } catch (Throwable t) {
             return "学科状态读取失败: " + t;
+        }
+    }
+
+    /**
+     * 用"已读取到的学科配置"重建勾选列表（内容只来自服务器返回的数据，不掺任何猜测）。
+     * 没读到 → 显示提示 + 引导去点「立即探测学科」。
+     */
+    private void rebuildSubjectRows() {
+        try {
+            if (sSubjectBox == null) return;
+            sSubjectBox.removeAllViews();
+            sSubjectRowsFrom = XLModConfig.getKnownSubjects();
+            java.util.LinkedHashMap<String, String> known = XLModConfig.parseSubjectMap(sSubjectRowsFrom);
+            if (known.isEmpty()) {
+                TextView tv = new TextView(this);
+                tv.setText("还没有读到学科配置。\n请点下面的「立即探测学科」读一次服务器数据（或先手动打一次对战），读到之后这里才会出现可勾选的学科。");
+                tv.setTextSize(12.5f);
+                tv.setTextColor(0xFFD32F2F);
+                tv.setLineSpacing(dp(2), 1.05f);
+                tv.setPadding(dp(18), dp(6), dp(18), dp(6));
+                sSubjectBox.addView(tv);
+                return;
+            }
+            java.util.LinkedHashMap<String, String> picked =
+                    XLModConfig.parseSubjectMap(XLModConfig.getChallengeSelectedSubjects());
+            for (java.util.Map.Entry<String, String> e : known.entrySet()) {
+                final String sid = e.getKey();
+                final String sname = e.getValue() == null ? "" : e.getValue();
+                android.widget.CheckBox cb = new android.widget.CheckBox(this);
+                cb.setText(sname + "（" + sid + "）");
+                cb.setTextSize(14.5f);
+                cb.setTextColor(C_TEXT);
+                cb.setChecked(picked.containsKey(sid));
+                cb.setPadding(dp(12), dp(6), dp(12), dp(6));
+                cb.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                    @Override
+                    public void onCheckedChanged(android.widget.CompoundButton b, boolean checked) {
+                        java.util.LinkedHashMap<String, String> sel =
+                                XLModConfig.parseSubjectMap(XLModConfig.getChallengeSelectedSubjects());
+                        if (checked) {
+                            sel.put(sid, sname);
+                        } else {
+                            sel.remove(sid);
+                        }
+                        XLModConfig.setChallengeSelectedSubjects(XLModConfig.joinSubjectMap(sel));
+                        XLModConfig.logAppend("[打榜] 学科勾选: "
+                                + (sel.isEmpty() ? "全部" : XLModConfig.joinSubjectMap(sel)));
+                        refreshSubjectStatus();
+                    }
+                });
+                sSubjectBox.addView(cb, new LinearLayout.LayoutParams(-1, -2));
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 面板回到前台 / 配置变化时刷新学科区（读到的学科变了才重建列表） */
+    private void refreshSubjectOptions() {
+        try {
+            refreshSubjectStatus();
+            String known = XLModConfig.getKnownSubjects();
+            if (sSubjectBox != null && !known.equals(sSubjectRowsFrom)) {
+                rebuildSubjectRows();
+            }
+        } catch (Throwable ignored) {
         }
     }
 

@@ -122,13 +122,22 @@ ok('XLModConfig.addKnownSubject(sid, sname)' in H and 'XLModBank.harvestBattle(p
 ok('noteSubjectFromRank' in H and 'PARAM_SUBJECT_NAME' in H,
    'B2 金榜题名页 Intent 参数登记学科（autoOnRankResume）')
 ok('monthSubject.trim().substring(6)' in H, 'B2 结果页从 monthSubject(yyyyMM+学科) 反推学科并记录')
-ok('XLModConfig.addKnownSubjects(subs.toArray' in H, 'B2 首页探测到的学科批量登记')
+ok('XLModConfig.addKnownSubjects(subs.toArray' in H, 'B2 首页探测到的学科批量登记（id+名称都来自服务器）')
+ok('if (sProbeMode)' in H and 'finishSubjectProbe' in H and '学科探测: 服务器返回 ' in H,
+   'B2 探测模式：只登记服务器返回的学科并退出页面，不进入打榜流程')
 ok('filterSubjectsBySelection' in H and 'subs = filterSubjectsBySelection(subs)' in H,
    'B3 引擎按勾选过滤（startWithSubjects 是所有启动路径的唯一入口）')
 ok('勾选的学科一个都不在可用列表里' in H, 'B3 勾选与探测无交集时按勾选执行/放弃，不会误打其他科目')
 ok('每次要打的学科' in A and 'android.widget.CheckBox' in A, 'B4 面板有学科勾选列表')
-ok('全选（所有学科依次打）' in A and '清空勾选 = 不限制' in A, 'B4 面板有「全选 / 清空勾选」按钮')
-ok('subjectStatusText' in A and '已记录学科' in A, 'B4 面板显示已记录学科 + 最近一局 + 本次要打')
+ok('立即探测学科' in A and 'startSubjectProbe' in H, 'B4 面板有「立即探测学科」（读取服务器真实学科配置）按钮')
+ok('rebuildSubjectRows' in A and 'getKnownSubjects()' in A and 'putAll(XLModConfig.parseSubjectMap(XLModConfig.getChallengeSubjects()))' not in A,
+   'B4 勾选项**只来自已读取到的服务器学科**（不再拿猜测的学科表凑数）')
+ok('还没有读到学科配置' in A, 'B4 没读到学科时面板明确提示（而不是列出猜测学科）')
+ok('subAll' not in A, 'B4 旧的"猜测学科 + 已读学科"合并列表已移除')
+ok('s("challenge_subjects", "")' in C, 'B4 手动兜底学科默认**空**（旧版硬编码的 2:数学/1:语文 猜测表已删除）')
+ok('已有真实名称，别用 id 覆盖' in C, 'B4 学科名不会被降级覆盖（id-only 记录不会盖掉真实名称）')
+ok('isSubjectProbeRunning' in A and 'isSubjectProbeRunning' in H, 'B4 面板显示探测状态（读取中/空闲）')
+ok('getKnownSubjectsAt' in C and 'known_subjects_at' in C, 'B4 记录学科配置的读取时间')
 
 print("C. 题库（同学对战 → 普通挑战作答）")
 ok('harvestBattle' in B and 'harvestQuestion' in B and 'classmate' in B, 'C1 同学对战整局采集入库')

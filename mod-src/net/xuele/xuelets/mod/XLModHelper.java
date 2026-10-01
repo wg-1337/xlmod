@@ -3628,10 +3628,49 @@ public class XLModHelper {
     private static String[] sAutoSubjects = null;
     private static long sAutoScanStart = 0;
 
+    // ===== V4.3p：学科探测（只读取服务器真实学科配置，不打任何对局） =====
+    private static volatile boolean sProbeMode = false;
+    private static volatile long sProbeStartAt = 0L;
+
+    /** 面板「立即探测学科」：打开金榜题名首页读一次服务器返回的学科列表，读完自动返回 */
+    public static void startSubjectProbe(Activity act) {
+        XLModConfig.init(act);
+        try {
+            if (sAutoStep != 0) {
+                trace("学科探测: 自动打榜正在运行（step=" + sAutoStep + "），跳过本次探测");
+                return;
+            }
+            sProbeMode = true;
+            sProbeStartAt = System.currentTimeMillis();
+            trace("学科探测: 打开金榜题名首页读取真实学科配置（不自动开打）");
+            net.xuele.xuelets.magicwork.v3.activity.CompetitionListActivity.start(act);
+        } catch (Throwable t) {
+            sProbeMode = false;
+            trace("学科探测: 打开失败 " + t);
+        }
+    }
+
+    /** 是否正在探测学科（面板显示用；超过 2 分钟视为失效，避免卡住后续自动流程） */
+    public static boolean isSubjectProbeRunning() {
+        if (!sProbeMode) return false;
+        if (System.currentTimeMillis() - sProbeStartAt > 120000L) {
+            sProbeMode = false;
+            return false;
+        }
+        return true;
+    }
+
+    private static void finishSubjectProbe(Activity act) {
+        sProbeMode = false;
+        try {
+            if (act != null) act.finish();
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 挂点：CompetitionListActivity 数据成功回调（onReqSuccess） */
     public static void autoOnSubjectsList(final Activity act, net.xuele.xuelets.magicwork.v3.model.RE_GetSubCenterList re) {
         try {
-            if (sAutoStep != 5) return;
             java.util.ArrayList<String> subs = new java.util.ArrayList<String>();
             if (re != null && re.wrapper != null) {
                 for (net.xuele.xuelets.magicwork.v3.model.RE_GetSubCenterList.WrapperDTO w : re.wrapper) {
@@ -3644,6 +3683,29 @@ public class XLModHelper {
                     subs.add(sid + ":" + sname);
                 }
             }
+            // ===== V4.3p 学科探测模式：只记录服务器真实返回的学科，然后关掉页面，不进入打榜流程 =====
+            if (sProbeMode) {
+                int added = 0;
+                try {
+                    added = XLModConfig.addKnownSubjects(subs.toArray(new String[0]));
+                } catch (Throwable ignored) {
+                }
+                trace("学科探测: 服务器返回 " + subs.size() + " 个学科（新增/更新 " + added + "）："
+                        + (subs.isEmpty() ? "（空）" : joinList(subs)));
+                if (subs.isEmpty()) {
+                    trace("学科探测: 服务器没返回学科 —— 面板不会显示任何可选项（不用猜测的学科表）");
+                }
+                final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                final Activity fact = act;
+                h.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        finishSubjectProbe(fact);
+                    }
+                }, 400);
+                return;
+            }
+            if (sAutoStep != 5) return;
             if (sAutoSubjects == null) sAutoSubjects = subs.toArray(new String[0]);
             trace("自动打榜: 首页探测学科数=" + subs.size() + (subs.isEmpty() ? "" : " 首个=" + subs.get(0)));
             // V4.3p：探测到的学科登记到本地（面板据此列出"每次要打的学科"勾选项）
@@ -3676,6 +3738,11 @@ public class XLModHelper {
     /** 挂点：CompetitionListActivity 数据失败回调（onReqFailed） */
     public static void autoOnSubjectsFail(Activity act) {
         try {
+            if (sProbeMode) {
+                trace("学科探测: 首页数据失败 —— 没有读到学科配置（面板不会显示任何可选项）");
+                finishSubjectProbe(act);
+                return;
+            }
             if (sAutoStep != 5) return;
             trace("自动打榜: 首页探测失败，回退手动列表");
             sAutoStep = 0;
@@ -3684,6 +3751,15 @@ public class XLModHelper {
             startWithSubjects(act, sAutoSubjects);
         } catch (Throwable t) {
         }
+    }
+
+    private static String joinList(java.util.List<String> list) {
+        StringBuilder sb = new StringBuilder();
+        for (String s : list) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(s);
+        }
+        return sb.toString();
     }
 
     private static void startWithSubjects(Activity act, String[] subs) {

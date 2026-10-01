@@ -836,9 +836,13 @@ public class XLModConfig {
         wi("battles_per_subject", v);
     }
 
-    // 学科列表（id:名称），逗号分隔
+    /**
+     * 手动兜底学科（id:名称，逗号分隔）——**默认空**。
+     * 注意：正常路径不使用它：学科一律以服务器真实返回（known_subjects）为准；
+     * 这里只在"探测接口一直失败、你又想手动指定"时才填。
+     */
     public static String getChallengeSubjects() {
-        return s("challenge_subjects", "2:\u6570\u5b66,1:\u8bed\u6587,3:\u82f1\u8bed,4:\u7269\u7406,5:\u5316\u5b66,6:\u751f\u7269,7:\u5386\u53f2,8:\u5730\u7406,9:\u653f\u6cbb");
+        return s("challenge_subjects", "");
     }
 
     public static void setChallengeSubjects(String v) {
@@ -908,14 +912,25 @@ public class XLModConfig {
     }
 
     // ============ 对战学科记录与"每次要打的学科"（V4.3p） ============
-    // recorded: "id:名称,id:名称"（打对战时/探测首页时自动登记）
-    // selected: "id:名称,..."（面板勾选；空 = 不限制，按探测到的全部学科依次打）
+    // known:     "id:名称,id:名称" —— **只来自服务器真实返回**（金榜题名首页列表 / 对战页 subjectId+subjectName /
+    //            结果页 monthSubject 反推）。绝不使用任何猜测的学科表。
+    // selected:  "id:名称,..."（面板勾选；空 = 不限制，按探测到的全部学科依次打）
+    // manual:    "id:名称,..."（手动兜底，默认空；只有探测不到又不填就没有学科可打）
 
     public static String getKnownSubjects() {
         return s("known_subjects", "");
     }
 
-    /** 登记一个学科（幂等）；有变化返回 true */
+    /** 学科配置最后读取时间（面板显示/判断是否需要重新探测） */
+    public static long getKnownSubjectsAt() {
+        return cfgGetLong("known_subjects_at", 0L);
+    }
+
+    /**
+     * 登记一个学科（幂等）。**只在名字更"完整"时更新**，避免旧数据被降级：
+     * 例如先用 monthSubject 反推出 id（没有名字），之后从服务器读到 id+名称，则以名称为准。
+     * 有变化返回 true。
+     */
     public static boolean addKnownSubject(String id, String name) {
         try {
             if (id == null || id.trim().isEmpty()) return false;
@@ -924,8 +939,12 @@ public class XLModConfig {
             java.util.LinkedHashMap<String, String> map = parseSubjectMap(getKnownSubjects());
             String old = map.get(id);
             if (nm.equals(old)) return false;
+            if (old != null && !old.isEmpty() && !old.equals(id) && nm.equals(id)) {
+                return false;       // 已有真实名称，别用 id 覆盖
+            }
             map.put(id, nm);
             ws("known_subjects", joinSubjectMap(map));
+            cfgSetLong("known_subjects_at", System.currentTimeMillis());
             return true;
         } catch (Throwable t) {
             return false;
@@ -950,6 +969,7 @@ public class XLModConfig {
 
     public static void setKnownSubjects(String v) {
         ws("known_subjects", v == null ? "" : v.trim());
+        cfgSetLong("known_subjects_at", System.currentTimeMillis());
     }
 
     /** 面板勾选"每次要打的学科"；空字符串 = 全部学科 */
