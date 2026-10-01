@@ -662,7 +662,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.3p";
+    public static final String VERSION = "v4.4p";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -834,6 +834,48 @@ public class XLModConfig {
 
     public static void setBattlesPerSubject(int v) {
         wi("battles_per_subject", v);
+    }
+
+    // ============ 自动打什么（V4.4p） ============
+    // 0=同学对战（旧行为） 1=普通挑战 2=同学对战 + 普通挑战（同一学科先打对战，再打普通）
+    public static int getChallengeKind() {
+        int v = i("challenge_kind", 0);
+        return v < 0 ? 0 : (v > 2 ? 2 : v);
+    }
+
+    public static void setChallengeKind(int v) {
+        wi("challenge_kind", v < 0 ? 0 : (v > 2 ? 2 : v));
+    }
+
+    // ============ 题库没答案时的兜底（V4.4p） ============
+    // 「普通挑战」的题目本地没有答案标记：题库/接口都没命中时，选择题盲选 B、填空/听写乱填。
+    // 只在**自动打榜引擎运行中**生效（手动答题不受影响）。
+    public static boolean isBlindFallback() {
+        return b("blind_fallback", true);
+    }
+
+    public static void setBlindFallback(boolean v) {
+        wb("blind_fallback", v);
+    }
+
+    /** 盲填内容（填空/听写没答案时填它） */
+    public static String getBlindFillText() {
+        String v = s("blind_fill_text", "不会");
+        return (v == null || v.trim().isEmpty()) ? "不会" : v.trim();
+    }
+
+    public static void setBlindFillText(String v) {
+        ws("blind_fill_text", v == null ? "" : v.trim());
+    }
+
+    // ============ 打完自动收集挑战详情（V4.4p） ============
+    /** 每局结束自动拉「挑战详情」（题目 + 正确答案）入库 —— 普通挑战的答案只能从详情拿到 */
+    public static boolean isAutoHarvestDetail() {
+        return b("auto_harvest_detail", true);
+    }
+
+    public static void setAutoHarvestDetail(boolean v) {
+        wb("auto_harvest_detail", v);
     }
 
     /**

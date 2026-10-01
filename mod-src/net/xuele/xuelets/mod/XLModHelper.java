@@ -3438,9 +3438,16 @@ public class XLModHelper {
         try {
             if (!XLModConfig.isAutoChallenge()) return 0;
             if (sAutoStep != 1 && sAutoStep != 2) return 0;
-            // 服务端：每科每天最多三次 —— 本学科视为打完，直接跳下一学科
+            // 服务端：每科每天最多三次 —— 本阶段视为打完
             sAutoBattlesThisSubject = XLModConfig.getBattlesPerSubject();
             sAutoWaitingBattle = false;
+            if (needSwitchToNormal()) {
+                // V4.4p：同学对战次数用完 → 还有普通挑战可打，交给 rank onResume 切阶段
+                sAutoStep = 1;
+                syncAutoActive();
+                trace("自动打榜: 同学对战次数已用完，转普通挑战");
+                return 1;
+            }
             syncAutoActive();
             trace("自动打榜: 挑战次数已用完，本学科结束");
             return 1;
@@ -3555,6 +3562,24 @@ public class XLModHelper {
     private static int sAutoBattlesThisSubject = 0;
     private static boolean sAutoWaitingBattle = false;
     private static long sAutoLastStart = 0;
+    /** V4.4p：本学科当前打的是不是"普通挑战"阶段（false=同学对战） */
+    private static boolean sAutoPhaseNormal = false;
+
+    /** 当前阶段名（日志/面板用） */
+    private static String phaseName() {
+        return sAutoPhaseNormal ? "普通挑战" : "同学对战";
+    }
+
+    /** 自动打什么（面板文案） */
+    private static String kindName() {
+        int k = XLModConfig.getChallengeKind();
+        return k == 1 ? "只打普通挑战" : (k == 2 ? "同学对战+普通挑战" : "只打同学对战");
+    }
+
+    /** 是否需要从"同学对战"转到"普通挑战"（kind=2 且本学科对战已打满） */
+    private static boolean needSwitchToNormal() {
+        return XLModConfig.getChallengeKind() == 2 && !sAutoPhaseNormal;
+    }
 
     /** 由 MainActivity.onResume(经autoSignIfNeeded) 触发：到点且未完成 → 启动当天打榜 */
     private static void autoChallengeTick(Activity act) {
@@ -3567,6 +3592,7 @@ public class XLModHelper {
                 sAutoSubjectIdx = 0;
                 sAutoBattlesThisSubject = 0;
                 sAutoWaitingBattle = false;
+                sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1);
                 syncAutoActive();
             }
             String uid = net.xuele.android.common.login.LoginManager.getInstance().getUserId();
@@ -3601,8 +3627,9 @@ public class XLModHelper {
             sAutoSubjectIdx = 0;
             sAutoBattlesThisSubject = 0;
             sAutoWaitingBattle = false;
+            sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1);
             sAutoSubjects = null;
-            trace("自动打榜: 手动触发单次流程");
+            trace("自动打榜: 手动触发单次流程（" + phaseName() + "）");
             startScan(act);
         } catch (Throwable t) {
             trace("自动打榜: 手动触发异常 " + t);
@@ -3777,11 +3804,13 @@ public class XLModHelper {
             sAutoSubjects = subs;
             sAutoSubjectIdx = 0;
             sAutoBattlesThisSubject = 0;
+            sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1);
             sAutoStep = 1;
             sFetchFailCount = 0;
             syncAutoActive();
             trace("自动打榜: 启动 学科=" + subs[0] + " 列表=" + subs.length
-                    + "（勾选=" + (XLModConfig.getChallengeSelectedSubjects().isEmpty()
+                    + "（打什么=" + kindName() + " · 当前阶段=" + phaseName()
+                    + " · 勾选=" + (XLModConfig.getChallengeSelectedSubjects().isEmpty()
                     ? "全部" : XLModConfig.getChallengeSelectedSubjects()) + "）");
             launchRank(act, subs[0]);
         } catch (Throwable t) {
@@ -3878,7 +3907,8 @@ public class XLModHelper {
             if (!XLModConfig.isAutoChallenge()) return;
             if (sAutoStep != 1) return;
             syncAutoActive();
-            trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + XLModConfig.getBattlesPerSubject());
+            trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + XLModConfig.getBattlesPerSubject()
+                    + "（" + phaseName() + "）");
             String[] subs = sAutoSubjects != null ? sAutoSubjects : parseSubjects(XLModConfig.getChallengeSubjects());
             if (subs.length == 0) return;
             // 看门狗：上次开战指令后 15 秒无任何题目出现 → 视为云朵不足/次数已尽，跳下一学科
@@ -3888,12 +3918,31 @@ public class XLModHelper {
                 sAutoBattlesThisSubject++;
                 sAutoStep = 1;
             }            if (sAutoBattlesThisSubject >= XLModConfig.getBattlesPerSubject()) {
+                // 本阶段（同学对战 / 普通挑战）打满：V4.4p 先看要不要转"普通挑战"，否则换下一学科
+                if (needSwitchToNormal()) {
+                    sAutoPhaseNormal = true;
+                    sAutoBattlesThisSubject = 0;
+                    trace("自动打榜: 本学科同学对战打满 → 转普通挑战");
+                    android.os.Handler hn = new android.os.Handler(android.os.Looper.getMainLooper());
+                    hn.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                ((net.xuele.xuelets.challenge.activity.ChallengeRankActivity) act).onFabMenuItemClick(1);
+                            } catch (Throwable t) {
+                                trace("自动打榜: 转普通挑战异常 " + t);
+                            }
+                        }
+                    }, XLModConfig.getChallengeEntryDelay());
+                    return;
+                }
                 // 本学科完成：切换下一学科
                 if (sAutoSubjectIdx + 1 < subs.length) {
                     sAutoSubjectIdx++;
                     sAutoBattlesThisSubject = 0;
+                    sAutoPhaseNormal = XLModConfig.getChallengeKind() == 1;
                     final String next = subs[sAutoSubjectIdx];
-                    trace("自动打榜: 换学科 -> " + next);
+                    trace("自动打榜: 换学科 -> " + next + "（" + phaseName() + "）");
                     android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
                     h.postDelayed(new Runnable() {
                         @Override
@@ -3928,7 +3977,8 @@ public class XLModHelper {
                 }
                 return;
             }
-            // 发起同学对战（随机匹配）。rank 页已加载时 goChallengeStudent 内部会刷新云朵/次数
+            // 发起本阶段的挑战：同学对战=FAB(2) / 普通挑战=FAB(1)（V4.4p 可选）
+            final int fabId = sAutoPhaseNormal ? 1 : 2;
             android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
             h.postDelayed(new Runnable() {
                 @Override
@@ -3938,8 +3988,8 @@ public class XLModHelper {
                         sAutoWaitingBattle = true;
                         sFetchFailCount = 0;
                         syncAutoActive();
-                        trace("自动打榜: 发起同学对战(点击FAB)");
-                        ((net.xuele.xuelets.challenge.activity.ChallengeRankActivity) act).onFabMenuItemClick(2);
+                        trace("自动打榜: 发起" + phaseName() + "(点击FAB " + fabId + ")");
+                        ((net.xuele.xuelets.challenge.activity.ChallengeRankActivity) act).onFabMenuItemClick(fabId);
                     } catch (Throwable t) {
                         trace("自动打榜: 发起异常 " + t);
                         sAutoWaitingBattle = false;
@@ -4014,7 +4064,7 @@ public class XLModHelper {
             sAutoBattlesThisSubject++;
             sFetchFailCount = 0;
             syncAutoActive();
-            trace("自动打榜: 结果页退出 本学科已打=" + sAutoBattlesThisSubject);
+            trace("自动打榜: 结果页退出 本学科已打=" + sAutoBattlesThisSubject + "（" + phaseName() + "）");
             android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
             h.postDelayed(new Runnable() {
                 @Override
@@ -4140,6 +4190,9 @@ public class XLModHelper {
         }
     }
 
+    /** V4.4p：本局是不是同学对战（结果页采集日志用；在 showAnswerFloat 里按 ph.isChallengeClassmate 更新） */
+    private static volatile boolean sLastBattleClassmate = false;
+
     /** 每局挑战结束（结果页）自动领取胜利云朵（服务端按胜负/已领校验） */
     public static void claimBattleCloudAfterResult(Activity act, String challengeId, String monthSubject) {
         XLModConfig.init(act);
@@ -4173,35 +4226,51 @@ public class XLModHelper {
                                     }
                                 });
             }
-            // 2) 赛后采集全部答案 → 本地知识库 + 题库（普通挑战下一局自动作答用）
-            if (XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat()
-                    || XLModConfig.isDebugFloat() || XLModBank.enabled()) {
-                harvestAnswers(act, challengeId, monthSubject);
+            // 2) V4.4p：打完自动拉「挑战详情」（等价于进详情页收集，只是走接口不弹页面）
+            //    —— 同学对战能从本地拿到答案；普通挑战本地没有答案标记，只能靠这里入库
+            if (XLModConfig.isAutoHarvestDetail()
+                    && (XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat()
+                    || XLModConfig.isDebugFloat() || XLModBank.enabled())) {
+                harvestChallengeDetail(challengeId, monthSubject,
+                        sLastBattleClassmate ? "同学对战" : "普通挑战");
             }
         } catch (Throwable t) {
         }
     }
 
-    /** 赛后从详情数据采集每题答案，写入知识库（S| 正确ID列表 / F| 填空文本序列） */
-    private static void harvestAnswers(Activity act, String challengeId, String monthSubject) {
+    /**
+     * V4.4p：打完自动进「挑战详情」（接口版）收集题目 —— 与结果页「查看详情」走的是同一个接口
+     * （{@code ChallengeDetailHelper.loadQuestionList}），只是不弹页面、直接把题目+正确答案入库。
+     *
+     * <p>为什么必须做：普通挑战的本地题目数据**没有** isCorrect/答案文本，题库只能靠详情补；
+     * 同学对战虽然有本地答案，详情再采一遍也能补齐填空/听力。</p>
+     */
+    static void harvestChallengeDetail(String challengeId, String monthSubject, String reason) {
         try {
+            final int before = XLModBank.size();
+            final String fReason = reason == null ? "" : reason;
+            trace("[题库] 挑战详情采集开始（" + fReason + "）：challengeId=" + shortId(challengeId)
+                    + " monthSubject=" + monthSubject);
             net.xuele.xuelets.challenge.util.ChallengeDetailHelper.loadQuestionList(
                     challengeId, monthSubject,
                     new net.xuele.xuelets.challenge.util.ChallengeDetailHelper.LoadDataInterface() {
                         @Override
                         public void loadQuestionFail(String s) {
+                            trace("[题库] 挑战详情采集失败（" + fReason + "）："
+                                    + (s == null ? "" : s) + " —— 本题库这局没有新增");
                         }
 
                         @Override
                         public void loadQuestionListSuccess(java.util.ArrayList<M_ChallengeQuestion> list, java.util.HashMap<Integer, net.xuele.android.ui.question.ChallengeUserAnswer> map) {
                             try {
                                 if (list == null) return;
+                                int withAnswer = 0;
                                 for (M_ChallengeQuestion q : list) {
                                     if (q == null || q.questionId == null || q.questionId.isEmpty()) continue;
                                     sDetailMap.put(q.questionId, q);
-                                    // V4.3p：详情数据整题入库（含正确答案文本/填空文本）
+                                    // V4.3p/V4.4p：详情数据整题入库（含正确答案文本/填空文本）
                                     try {
-                                        XLModBank.harvestQuestion(q, "detail");
+                                        if (XLModBank.harvestQuestion(q, "detail")) withAnswer++;
                                     } catch (Throwable ignored) {
                                     }
                                     java.util.List<AnswersBean> ans = q.answers;
@@ -4237,12 +4306,24 @@ public class XLModHelper {
                                         }
                                     }
                                 }
+                                int now = XLModBank.size();
+                                trace("[题库] 挑战详情采集完成（" + fReason + "）：详情 "
+                                        + (list == null ? 0 : list.size()) + " 题，其中带答案 " + withAnswer
+                                        + " 题；题库 " + before + " → " + now + " 题");
+                                XLModBank.save(true);
                             } catch (Throwable t) {
+                                trace("[题库] 详情入库异常: " + t);
                             }
                         }
                     });
         } catch (Throwable t) {
+            trace("[题库] 挑战详情采集异常（" + reason + "）: " + t);
         }
+    }
+
+    private static String shortId(String s) {
+        if (s == null) return "";
+        return s.length() > 14 ? s.substring(0, 14) + "…" : s;
     }
 
     private static void doUserSpaceSign(final Activity act, final String uid) {
@@ -4392,7 +4473,11 @@ public class XLModHelper {
      * 解决普通挑战本地无 isCorrect 时自动作答失效的问题。
      */
     public static ChallengeUserAnswer applyApiAnswers(M_ChallengeQuestion q, ChallengeUserAnswer ua) {
-        if (!XLModConfig.isAutoAnswer()) return ua;
+        if (!XLModConfig.isAutoAnswer()) {
+            // V4.4p：没开"自动作答"但自动打榜在跑 → 至少做盲答兜底（否则会空着交卷卡住流程）
+            applyBlindFallback(q, ua);
+            return ua;
+        }
         if (ua == null || q == null) return ua;
         try {
             String qid = q.questionId == null ? "" : q.questionId;
@@ -4405,7 +4490,10 @@ public class XLModHelper {
                     return ua;
                 }
             }
-            if (q.answers == null) return ua;
+            if (q.answers == null) {
+                applyBlindFallback(q, ua);      // 没有选项数据（填空题常见）→ 盲填
+                return ua;
+            }
             // 1) 题库（同学对战采集）优先：按正确答案文本匹配当前题目的选项顺序
             if (!qid.isEmpty() && XLModBank.apply(qid, q, ua)) {
                 return ua;
@@ -4460,9 +4548,79 @@ public class XLModHelper {
                 }
                 if (!ua.answerIdList.isEmpty()) return ua;
             }
+            // 3) V4.4p：题库/接口都没命中 → 盲答兜底（选择题选 B、填空/听写乱填），
+            //    只在自动打榜运行时生效（普通挑战本地没有答案标记，不兜底就会空着交卷）
+            applyBlindFallback(q, ua);
         } catch (Throwable t) {
         }
         return ua;
+    }
+
+    /**
+     * 盲答兜底（V4.4p）：没有已知答案时"随便答"。
+     *
+     * <ul>
+     *   <li>单选/多选/判断（11/12/2）→ 选 <b>B</b>（第二个选项；只有一个选项时选第一个）；</li>
+     *   <li>填空（3）/听写（51）→ 填「盲填内容」（默认「不会」，面板可改）；</li>
+     *   <li>口语（52）→ 跳过（无法自动作答）。</li>
+     * </ul>
+     *
+     * <p>只对已在答题的自动打榜流程生效：{@code sAutoEngineActive==1}（手动答题不受影响）。</p>
+     */
+    public static void applyBlindFallback(M_ChallengeQuestion q, ChallengeUserAnswer ua) {
+        try {
+            if (!XLModConfig.isBlindFallback()) return;
+            if (XLModConfig.sAutoEngineActive != 1) return;      // 只在自动打榜运行时兜底
+            if (q == null || ua == null) return;
+            if (!isEmptyAnswer(ua)) return;                      // 已有答案：不动
+            int t = parseQType(q);
+            if (t == 11 || t == 12 || t == 2) {
+                java.util.List<AnswersBean> ans = q.answers;
+                if (ans == null || ans.isEmpty()) return;
+                AnswersBean pick = ans.size() >= 2 ? ans.get(1) : ans.get(0);   // B：第二个选项
+                if (pick == null) return;
+                ua.answerIdList.clear();
+                ua.answerContentList.clear();
+                ua.answerIdList.add(pick.answerId == null ? "" : pick.answerId);
+                String c = (pick.sortid != null && !pick.sortid.isEmpty()) ? pick.sortid
+                        : (pick.answerContent == null ? "" : pick.answerContent);
+                ua.answerContentList.add(c);
+                XLModConfig.logAppend("[盲答] 无答案 → 盲选 B: " + q.questionId
+                        + "（选项数 " + ans.size() + "）");
+                return;
+            }
+            if (t == 3 || t == 51) {
+                String fill = XLModConfig.getBlindFillText();
+                int blanks = 1;
+                if (t == 3 && q.answers != null && !q.answers.isEmpty()) blanks = q.answers.size();
+                ua.answerIdList.clear();
+                ua.answerContentList.clear();
+                for (int i = 0; i < blanks; i++) ua.answerContentList.add(fill);
+                XLModConfig.logAppend("[盲答] 无答案 → 盲填「" + fill + "」: " + q.questionId
+                        + "（空数 " + blanks + "）");
+            }
+        } catch (Throwable t) {
+        }
+    }
+
+    /** 用户答案是否为空（选择/填空/听写都算） */
+    private static boolean isEmptyAnswer(ChallengeUserAnswer ua) {
+        try {
+            if (ua == null) return true;
+            if (ua.answerIdList != null && !ua.answerIdList.isEmpty()) {
+                for (String s : ua.answerIdList) {
+                    if (s != null && !s.trim().isEmpty()) return false;
+                }
+            }
+            if (ua.answerContentList != null && !ua.answerContentList.isEmpty()) {
+                for (String s : ua.answerContentList) {
+                    if (s != null && !s.trim().isEmpty()) return false;
+                }
+            }
+            return true;
+        } catch (Throwable t) {
+            return true;
+        }
     }
 
     // ================= 听力(51)自动作答 =================
@@ -4666,6 +4824,7 @@ public class XLModHelper {
                 sid = ph.mHelper.subjectId == null ? "" : ph.mHelper.subjectId;
                 sname = ph.mHelper.subjectName == null ? "" : ph.mHelper.subjectName;
             }
+            sLastBattleClassmate = ph.isChallengeClassmate;     // V4.4p：结果页采集日志用
             if (!sid.isEmpty()) {
                 XLModConfig.addKnownSubject(sid, sname);
                 XLModConfig.setLastBattleSubject(sid, sname);

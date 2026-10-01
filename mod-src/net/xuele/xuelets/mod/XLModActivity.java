@@ -593,6 +593,26 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 "全自动打榜：到点自动开打/自动答题/自动退出，每学科上限后自动换学科，全打完标记今日完成",
                 XLModConfig.isAutoChallenge(),
                 new View.OnClickListener() { public void onClick(View v) { XLModConfig.setAutoChallenge(((MiuixSwitch) v).isChecked()); } });
+        spinnerRow(cardAuto, "自动打什么（V4.4p）",
+                new String[]{"同学对战（原行为）", "普通挑战", "同学对战 + 普通挑战（先对战再普通）"},
+                Math.min(2, Math.max(0, XLModConfig.getChallengeKind())),
+                new SpinnerWatcher() { public void onPos(int pos) { XLModConfig.setChallengeKind(pos); } });
+        switchRow(cardAuto,
+                "题库没答案时兜底：选择题盲选 B、填空/听写乱填（只在自动打榜时生效）",
+                XLModConfig.isBlindFallback(),
+                new View.OnClickListener() { public void onClick(View v) { XLModConfig.setBlindFallback(((MiuixSwitch) v).isChecked()); } });
+        EditText etBlind = inputRow(cardAuto, "盲填内容", XLModConfig.getBlindFillText(), ++rowId);
+        final EditText fEtBlind = etBlind;
+        etBlind.addTextChangedListener(new SimpleWatcher() {
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                XLModConfig.setBlindFillText(fEtBlind.getText().toString());
+            }
+        });
+        switchRow(cardAuto,
+                "打完自动进挑战详情收集题目（接口版：题目 + 正确答案入库）",
+                XLModConfig.isAutoHarvestDetail(),
+                new View.OnClickListener() { public void onClick(View v) { XLModConfig.setAutoHarvestDetail(((MiuixSwitch) v).isChecked()); } });
         actionButton(cardAuto, "手动执行一次自动打榜（无视今日标记/时间）", true,
                 new View.OnClickListener() {
                     @Override
@@ -703,7 +723,11 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
         });
         rebuildSubjectRows();
         addCardGated(content, cardAuto, gChallenge);
-        tipGated(content, gChallenge, "到点自动进「同学对战」：自动答题、获胜自动退出，学科打满自动换下一科。\n需要先开启「自动作答」；打榜页出现后请不要手动操作。\n学科配置**只认服务器返回的真实数据**（金榜题名首页/对战页/结果页读到什么就记什么），勾选后只打勾选的；一个都不勾 = 不限制。");
+        tipGated(content, gChallenge, "到点自动进金榜题名：**自动打什么**可选「同学对战 / 普通挑战 / 两者都打」（两者都打 = 同一学科先把同学对战打满，再打普通挑战）。\n"
+                + "自动答题、获胜自动退出，学科打满自动换下一科；需要先开启「自动作答」；打榜页出现后请不要手动操作。\n"
+                + "普通挑战的题本地没有答案标记：先用题库/接口找答案，**找不到就盲答**（选择题选 B，填空/听写填「盲填内容」）。\n"
+                + "每局结束会**自动拉一次挑战详情**（与结果页「查看详情」同一个接口，不弹页面）把题目与正确答案补进题库。\n"
+                + "学科配置**只认服务器返回的真实数据**（金榜题名首页/对战页/结果页读到什么就记什么），勾选后只打勾选的；一个都不勾 = 不限制。");
 
         // ===== 云朵助手 =====
         boolean gFlower = addGroupHeaderGated(content, "云朵助手", "cloud_flower");

@@ -4,25 +4,29 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.3p 三项新功能：
+"""验证 V4.4p 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
    A2 仓库：license.json 只有"配置+签名"单文件；payload 里**没有密码明文**、只有 PBKDF2 校验块；
           本地 features.json 保留明文密码（方便用记事本改）
    A3 回到旧方案：无 AES / 无主密钥 / 无 XLModSecrets
-B 学科记录与"每次要打的学科"
-   B1 配置项（known/selected/last battle）
-   B2 采集点（每题显示登记学科 / 榜页 Intent / 结果页 monthSubject）
+B 学科：只认服务器真实配置 + 每次可选
+   B1 配置项（known/selected/last battle/读取时间）
+   B2 采集点（探测模式 / 每题显示 / 榜页 Intent / 结果页 monthSubject）
    B3 引擎过滤（startWithSubjects 只打勾选）
-   B4 面板勾选 UI
+   B4 面板：只列读到的学科、没读到明确提示、立即探测按钮
 C 题库（同学对战采集 → 普通挑战作答）
    C1 采集：同学对战整局入库 + 详情接口入库 + 听力入库
    C2 应用：自动作答两处接入口 + 内容优先匹配
    C3 存储：本地 JSON 落盘/加载/导出/清空/上限淘汰
    C4 算法：镜像 apply() 的匹配策略，验证"选项顺序不同也能答对"（选择/多选/填空/听力）
+E 普通挑战自动打 + 盲答兜底 + 打完自动收集详情（V4.4p）
+   E1 自动打什么：kind 配置 + FAB(1=普通 / 2=对战) + 每学科"先对战再普通"换阶段 + 次数用尽处理
+   E2 盲答：题库/接口没命中时 选择盲选 B、填空/听写盲填；只在自动打榜运行时生效
+   E3 打完自动进挑战详情收集（接口版）：开关 + 结果页钩子 + 日志/落盘
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.3p（唯一来源）
+   D1 XLModConfig.VERSION = v4.4p（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -211,7 +215,7 @@ ok(bank_apply({'t': 11, 'opts': [{'i': 'z1', 'c': '', 'd': 'B'}], 'k': [0]},
               [{'i': 'z1', 'c': '', 'd': 'A'}]) == ['A'], 'C4 文本缺失时用选项ID兜底')
 
 print("D. 版本与产物")
-ok('VERSION = "v4.3p"' in C, 'D1 XLModConfig.VERSION = v4.3p')
+ok('VERSION = "v4.4p"' in C, 'D1 XLModConfig.VERSION = v4.4p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -240,11 +244,86 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.3p'), 'D2 APK 内含版本号 v4.3p（密文解回原文）')
+    ok(has('v4.4p'), 'D2 APK 内含版本号 v4.4p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
+
+print("E. 普通挑战自动打 + 盲答兜底 + 打完自动收集详情（V4.4p）")
+ok('challenge_kind' in C and 'getChallengeKind' in C and 'setChallengeKind' in C,
+   'E1 新增「自动打什么」（challenge_kind：0=对战 1=普通 2=两者）')
+ok('getChallengeKind() == 2' in H and 'needSwitchToNormal' in H and 'sAutoPhaseNormal' in H,
+   'E1 两者都打：本学科同学对战打满 → 转普通挑战（同一学科先对战再普通）')
+ok('sAutoPhaseNormal ? 1 : 2' in H and 'onFabMenuItemClick(fabId)' in H,
+   'E1 FAB 按阶段点：普通挑战=1 / 同学对战=2')
+ok('phaseName()' in H and 'kindName()' in H, 'E1 日志区分阶段与"打什么"（排障可读）')
+ok('同学对战次数已用完，转普通挑战' in H, 'E1 对战次数用完 → 转普通挑战（而不是直接放弃本科）')
+ok('sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1)' in H,
+   'E1 每日重置/手动触发/换学科时都按 kind 复位阶段')
+ok('自动打什么（V4.4p）' in A and '同学对战 + 普通挑战（先对战再普通）' in A, 'E1 面板可选「自动打什么」')
+
+ok('applyBlindFallback' in H and '盲答' in H, 'E2 盲答兜底函数存在')
+ok('blind_fallback' in C and 'isBlindFallback' in C and 'blind_fill_text' in C,
+   'E2 盲答开关 + 盲填内容（默认「不会」）可配置')
+ok('XLModConfig.sAutoEngineActive != 1' in H, 'E2 只在自动打榜运行时生效（手动答题不受影响）')
+ok('ans.size() >= 2 ? ans.get(1) : ans.get(0)' in H, 'E2 选择题盲选 B（第二个选项；只有一个选项时选第一个）')
+ok('blanks = q.answers.size()' in H and 'ua.answerContentList.add(fill)' in H,
+   'E2 填空/听写盲填（填空按空数逐个填）')
+ok("t == 3 || t == 51" in H, 'E2 盲填覆盖填空(3)与听写(51)；口语(52)跳过')
+ok('isEmptyAnswer(ua)' in H and '已有答案：不动' in H, 'E2 已有答案时不覆盖（题库/接口优先）')
+ok('applyBlindFallback(q, ua);' in H and H.count('applyBlindFallback') >= 3,
+   'E2 提交前钩子（applyApiAnswers）里调用：没开自动作答时也兜底')
+
+ok('isAutoHarvestDetail' in C and 'auto_harvest_detail' in C, 'E3 开关：打完自动进挑战详情收集题目')
+ok('harvestChallengeDetail' in H and 'ChallengeDetailHelper.loadQuestionList' in H,
+   'E3 走与结果页「查看详情」同一个接口收集（不弹页面）')
+ok('挑战详情采集开始' in H and '挑战详情采集完成' in H and '挑战详情采集失败' in H,
+   'E3 采集有开始/完成（题数、带答案数、题库增量）/失败日志')
+ok('XLModBank.save(true)' in H, 'E3 采集完立刻落盘题库')
+ok('sLastBattleClassmate' in H, 'E3 采集日志区分同学对战 / 普通挑战')
+ok('打完自动进挑战详情收集题目' in A, 'E3 面板有该开关 + 说明')
+
+print("E4 盲答算法镜像（无答案 → 选择题选 B / 填空乱填）")
+
+
+def blind(q_type, opts, ua, engine=True, enabled=True, fill='不会'):
+    """镜像 applyBlindFallback 的判定"""
+    if not enabled or not engine:
+        return ua
+    if ua.get('ids') or ua.get('contents'):
+        return ua
+    if q_type in (11, 12, 2):
+        if not opts:
+            return ua
+        pick = opts[1] if len(opts) >= 2 else opts[0]
+        return {'ids': [pick['i']], 'contents': [pick.get('d') or pick.get('c')]}
+    if q_type in (3, 51):
+        n = len(opts) if (q_type == 3 and opts) else 1
+        return {'ids': [], 'contents': [fill] * n}
+    return ua
+
+
+OPT4 = [{'i': 'a1', 'c': '北京', 'd': 'A'}, {'i': 'a2', 'c': '上海', 'd': 'B'},
+        {'i': 'a3', 'c': '广州', 'd': 'C'}, {'i': 'a4', 'c': '深圳', 'd': 'D'}]
+empty = {'ids': [], 'contents': []}
+got = blind(11, OPT4, dict(empty))
+ok(got['ids'] == ['a2'] and got['contents'] == ['B'], 'E4 无答案单选题 → 选 B（%s）' % got['contents'])
+got = blind(12, OPT4, dict(empty))
+ok(got['ids'] == ['a2'], 'E4 无答案多选题 → 也先选 B（至少不作弊式空交）')
+got = blind(11, [{'i': 'z1', 'c': '唯一', 'd': 'A'}], dict(empty))
+ok(got['ids'] == ['z1'], 'E4 只有一个选项 → 选第一个（不会崩）')
+got = blind(2, OPT4, dict(empty))
+ok(got['ids'] == ['a2'], 'E4 判断题 → 选第二个（B）')
+got = blind(3, [{'i': 'b1'}, {'i': 'b2'}], dict(empty))
+ok(got['contents'] == ['不会', '不会'], 'E4 两个空的填空题 → 逐空乱填（%s）' % got['contents'])
+got = blind(51, [], dict(empty))
+ok(got['contents'] == ['不会'], 'E4 听写题 → 盲填一条')
+ok(blind(52, [], dict(empty)) == empty, 'E4 口语题不盲答（无法自动作答）')
+known = {'ids': ['a3'], 'contents': ['C']}
+ok(blind(11, OPT4, dict(known)) == known, 'E4 已有答案（题库命中）→ 原样不动')
+ok(blind(11, OPT4, dict(empty), engine=False) == empty, 'E4 非自动打榜（手动答题）→ 不盲答')
+ok(blind(11, OPT4, dict(empty), enabled=False) == empty, 'E4 关掉盲答开关 → 不盲答')
 
 print("=" * 68)
 if problems:
@@ -252,4 +331,4 @@ if problems:
     for p in problems:
         print("  -", p)
     sys.exit(1)
-print("全部通过：管理员解锁（配置字段 + 明文不上仓库）/ 学科可选 / 题库作答 三项功能链路完整")
+print("全部通过：普通挑战自动打 / 盲答兜底（选择题选B·填空乱填）/ 打完自动收集详情 / 管理员解锁 / 学科可选 / 题库作答 全部就位")
