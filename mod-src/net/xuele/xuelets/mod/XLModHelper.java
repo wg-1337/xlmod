@@ -3576,17 +3576,30 @@ public class XLModHelper {
         return k == 1 ? "只打普通挑战" : (k == 2 ? "同学对战+普通挑战" : "只打同学对战");
     }
 
-    /** V4.7p：本阶段的有效上限（无限刷时 = unlimitedSwitchAfter，0 = 一直打当前学科不换科） */
+    /**
+     * V4.9p：本学科"打几局"的上限。
+     *
+     * <p>规则（把两个旋钮说清楚，别再互相打架）：</p>
+     * <ul>
+     *   <li><b>每学科打几局(0=不限)</b>（{@code unlimited_switch_after}）>0 → 以它为准（不管有没有开无限刷）；</li>
+     *   <li>它 = 0 时：开了无限刷 → 不限（一直打）；没开 → 用「每学科次数」（服务端规则 1..3）。</li>
+     * </ul>
+     */
     private static int effectiveCap() {
         try {
-            if (XLModConfig.isChallengeUnlimited()) {
-                int u = XLModConfig.getUnlimitedSwitchAfter();
-                return u <= 0 ? Integer.MAX_VALUE : u;
-            }
+            int perSubject = XLModConfig.getUnlimitedSwitchAfter();
+            if (perSubject > 0) return perSubject;                 // 明确了"打几局"
+            if (XLModConfig.isChallengeUnlimited()) return Integer.MAX_VALUE;
             return XLModConfig.getBattlesPerSubject();
         } catch (Throwable t) {
             return XLModConfig.getBattlesPerSubject();
         }
+    }
+
+    /** 上限是否"不限"（日志文案用） */
+    private static String capText() {
+        int c = effectiveCap();
+        return c == Integer.MAX_VALUE ? "不限" : String.valueOf(c);
     }
 
     /** 是否需要从"同学对战"转到"普通挑战"（kind=2 且本学科对战已打满；无限刷时不回转） */
@@ -3979,7 +3992,7 @@ public class XLModHelper {
             if (!XLModConfig.isAutoChallenge()) return;
             if (sAutoStep != 1) return;
             syncAutoActive();
-            trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + effectiveCap()
+            trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + capText()
                     + "（" + phaseName() + "）");
             String[] subs = sAutoSubjects != null ? sAutoSubjects : parseSubjects(XLModConfig.getChallengeSubjects());
             if (subs.length == 0) return;
@@ -3991,6 +4004,8 @@ public class XLModHelper {
                 sAutoStep = 1;
             }            if (sAutoBattlesThisSubject >= effectiveCap()) {
                 // 本阶段（同学对战 / 普通挑战）打满：V4.4p 先看要不要转"普通挑战"，否则换下一学科
+                trace("[打榜] 本学科已打 " + sAutoBattlesThisSubject + "/" + capText() + " 局（"
+                        + phaseName() + "，共 " + subs.length + " 个学科，当前第 " + (sAutoSubjectIdx + 1) + " 个）");
                 if (needSwitchToNormal()) {
                     sAutoPhaseNormal = true;
                     sAutoBattlesThisSubject = 0;
@@ -4012,9 +4027,9 @@ public class XLModHelper {
                 if (sAutoSubjectIdx + 1 < subs.length) {
                     sAutoSubjectIdx++;
                     sAutoBattlesThisSubject = 0;
-                    sAutoPhaseNormal = XLModConfig.getChallengeKind() == 1;
+                    sAutoPhaseNormal = initialPhaseNormal();
                     final String next = subs[sAutoSubjectIdx];
-                    trace("自动打榜: 换学科 -> " + next + "（" + phaseName() + "）");
+                    trace("[打榜] 换学科 -> " + next + "（" + phaseName() + "）");
                     android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
                     h.postDelayed(new Runnable() {
                         @Override
@@ -4035,7 +4050,7 @@ public class XLModHelper {
                         XLModConfig.markChallengeDone(lm.getUserId());
                     } catch (Throwable t) {
                     }
-                    trace("自动打榜: 全部完成，标记今日完成");
+                    trace("[打榜] 本学科打满且已是最后一个学科 → 全部完成，标记今日完成并停止（想继续刷就开「普通挑战无限刷」或把「每学科打几局」调大）");
                     android.os.Handler h2 = new android.os.Handler(android.os.Looper.getMainLooper());
                     h2.postDelayed(new Runnable() {
                         @Override
@@ -4092,6 +4107,10 @@ public class XLModHelper {
                 return;
             }
             sAutoQuestionsThisBattle++;
+            // V4.9p：**改本地最大题数** —— 直接把 N 写进 paramHelper.mTotalQuestionCount，
+            // 宿主就会把第 N 题当成"最后一题"（进度条、最后一题视图、提交时带的 qTotal 全都按 N），
+            // 于是走宿主自己的正常提交流程结算（服务端认的就是这个 qTotal）。
+            applyLocalTotalQuestions(act);
             // V4.8p：自定义每局题数 —— 答满 N 题后，下一题出现时就"替用户点提交成绩"，让这一局结算
             int want = XLModConfig.getNormalQCount();
             if (want > 0 && sAutoQuestionsThisBattle > want && !sFinishingBattle) {
@@ -4189,6 +4208,38 @@ public class XLModHelper {
     private static int sAutoQuestionsThisBattle = 0;
     /** 已经发起过提前结算，避免重复提交 */
     private static volatile boolean sFinishingBattle = false;
+
+    /**
+     * V4.9p：把「每局题数」写进**宿主的本地最大题数** {@code paramHelper.mTotalQuestionCount}。
+     *
+     * <p>为什么这样最稳：宿主的整套"最后一题 / 进度 / 提交"逻辑都读这个字段，改了它之后：</p>
+     * <ul>
+     *   <li>第 N 题就是宿主眼里的最后一题（`onQuestionShowed` 会显示最后一题视图）；</li>
+     *   <li>提交时带的 {@code qTotal} 也是 N（服务端就按客户端报的总题数结算）；</li>
+     *   <li>不需要我们"抢在服务端总题数之前"硬提交，也不必等服务器给第 N+1 题。</li>
+     * </ul>
+     * 每题显示时都会校准一次（宿主拿到新题数据可能重写该字段）。
+     */
+    private static void applyLocalTotalQuestions(Activity act) {
+        try {
+            int want = XLModConfig.getNormalQCount();
+            if (want <= 0) return;
+            Object ph = getFieldValue(act, "paramHelper");
+            if (ph == null) return;
+            java.lang.reflect.Field f = findField(ph.getClass(), "mTotalQuestionCount");
+            if (f == null) return;
+            f.setAccessible(true);
+            Object cur = f.get(ph);
+            int now = (cur instanceof Integer) ? (Integer) cur : 0;
+            if (now != want) {
+                f.setInt(ph, want);
+                trace("[题数] 本地最大题数 " + now + " → " + want
+                        + "（宿主按这个数判定「最后一题」并提交，qTotal=" + want + "）");
+            }
+        } catch (Throwable t) {
+            trace("[题数] 本地最大题数写入失败: " + t);
+        }
+    }
 
     /**
      * V4.8q：当前题是不是"服务端定义的最后一题"（{@code mCurrentPosition >= mTotalQuestionCount-1}）。

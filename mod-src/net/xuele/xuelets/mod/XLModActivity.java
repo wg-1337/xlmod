@@ -619,7 +619,7 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 "普通挑战无限刷：跳过次数校验，答题照常得积分",
                 XLModConfig.isChallengeUnlimited(),
                 new View.OnClickListener() { public void onClick(View v) { XLModConfig.setChallengeUnlimited(((MiuixSwitch) v).isChecked()); } });
-        EditText etUnlimited = inputRow(cardAuto, "无限刷换科局数(0=不换)",
+        EditText etUnlimited = inputRow(cardAuto, "每学科打几局(0=不限)",
                 String.valueOf(XLModConfig.getUnlimitedSwitchAfter()), ++rowId);
         final EditText fEtUnlimited = etUnlimited;
         etUnlimited.addTextChangedListener(new SimpleWatcher() {
@@ -648,11 +648,12 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 new String[]{"正常提交（qStatus=1）", "放弃提交（qStatus=3）"},
                 Math.min(1, Math.max(0, XLModConfig.getFinishStatus())),
                 new SpinnerWatcher() { public void onPos(int pos) { XLModConfig.setFinishStatus(pos); } });
-        tipGated(cardAuto, gChallenge, "**每局题数**：0 = 不干预（按服务端总题数打完才提交）；填 N = 答满 N 题后，"
-                + "在下一题出现时**替你点宿主自己的「提交成绩」**，这一局才会真正**结算**（积分/战绩都靠这次提交）。\n"
-                + "宿主的逻辑是「打完服务端总题数才自动提交」，所以一直答下去是不会结算的 —— 想边刷边结算就把这里填成 10、20 这种。\n"
-                + "提交方式：正常提交(qStatus=1) 与宿主点「提交成绩」一致；若服务端对提前提交有意见，就换成「放弃提交(qStatus=3)」"
-                + "（宿主中途退出时用的就是它，同样会进结果页结算）。");
+        tipGated(cardAuto, gChallenge, "**每局题数**：0 = 不干预；填 N = **直接把宿主的「本地最大题数」改成 N** —— "
+                + "宿主会把第 N 题当成最后一题（进度条、最后一题视图、提交时带的 qTotal 全是 N），"
+                + "答完第 N 题就按宿主自己的正常流程提交结算（服务端认的就是这个 qTotal）。\n"
+                + "**每学科打几局(0=不限)**：填 1 = 每个学科只打一局就换下一个学科（只有一个学科时会打一局就停）；"
+                + "填 0 = 不限（开了「普通挑战无限刷」就一直打，没开则用「每学科次数」）。\n"
+                + "**提前结算方式**：正常提交(qStatus=1) 与宿主点「提交成绩」一致；服务端若有意见就换「放弃提交(qStatus=3)」。");
         tipGated(cardAuto, gChallenge, "**普通挑战无限刷（客户端核实结果）**：宿主的次数只是「开局时的一次服务端记账」——\n"
                 + "· 榜页：challengeSubjectTime(=normalTime) <= 0 就不让开局（客户端拦）；\n"
                 + "· 开局：competition/costChallengeCount 返回 functionCode==1 才算扣次成功，否则弹「次数已用完」退出（客户端拦）；\n"

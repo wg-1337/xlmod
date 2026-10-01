@@ -667,7 +667,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.8q";
+    public static final String VERSION = "v4.9p";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -912,7 +912,7 @@ public class XLModConfig {
     }
 
     public static void setUnlimitedSwitchAfter(int v) {
-        wi("unlimited_switch_after", v < 0 ? 0 : v);
+        wi("unlimited_switch_after", v < 0 ? 0 : (v > 200 ? 200 : v));
     }
 
     // ============ 自定义每局题数 + 提前结算（V4.8p） ============

@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.8q 全部新功能：
+"""验证 V4.9p 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.8q（唯一来源）
+   D1 XLModConfig.VERSION = v4.9p（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -339,7 +339,7 @@ ok('functionCode' in H and 'f.setInt(reCost, 1)' in H,
    'H1 开局：把 RE_CostChallengeCount.functionCode 改成 1（服务端说用完也当成功）')
 ok('effectiveCap()' in H and 'initialPhaseNormal()' in H and 'isChallengeUnlimited()' in H,
    'H1 引擎：无限刷时上限=MAX（0 局换科=不换）、阶段固定为普通挑战')
-ok('getUnlimitedSwitchAfter' in C and '无限刷换科局数' in A and '普通挑战无限刷' in A,
+ok('getUnlimitedSwitchAfter' in C and '每学科打几局(0=不限)' in A and '普通挑战无限刷' in A,
    'H1 面板开关 + 说明（含客户端核实结论）')
 ok('forceCostSuccess' in io.open('obf-rules.pro', encoding='utf-8').read()
    and 'forceUnlimitedNormalCount' in io.open('obf-rules.pro', encoding='utf-8').read(),
@@ -387,8 +387,8 @@ ok('sAutoQuestionsThisBattle = 0;      // V4.8p：新一局，题数归零' in H
    'I1 开局题数归零（无限刷时每局独立计数）')
 ok('sAutoQuestionsThisBattle = 0;      // V4.8p：本局结束，题数归零' in H,
    'I1 结算（结果页）后题数归零')
-ok('每局题数(0=服务端默认)' in A and '提前结算方式' in A and '一直答下去是不会结算的' in A,
-   'I1 面板有输入框 + 方式下拉 + 说明（含"宿主只在打完服务端总题数时才提交"这一核实结论）')
+ok('每局题数(0=服务端默认)' in A and '提前结算方式' in A and '本地最大题数' in A,
+   'I1 面板有输入框 + 方式下拉 + 说明（每局题数 = 改本地最大题数）')
 ok('qStatus=1' in A and 'qStatus=3' in A, 'I1 面板说明里写明两种提交状态的含义')
 
 print("I2 结算时机镜像")
@@ -407,8 +407,36 @@ ok(should_finish(10, 10, False) is False, 'I2 第 10 题 → 照常答完（保�
 ok(should_finish(11, 10, False) is True, 'I2 第 11 题出现 → 发起提交结算')
 ok(should_finish(11, 10, True) is False, 'I2 已发起过提交 → 不重复提交')
 
+print("J. 本地最大题数 / 每学科局数（V4.9p）")
+ok('applyLocalTotalQuestions' in H and 'mTotalQuestionCount' in H and 'f.setInt(ph, want)' in H,
+   'J1 每局题数直接写进宿主本地最大题数（mTotalQuestionCount = N）')
+ok('applyLocalTotalQuestions(act);' in H and 'sAutoQuestionsThisBattle++;' in H,
+   'J1 每题显示时都校准一次本地最大题数（宿主拿到新题可能重写）')
+ok('宿主按这个数判定「最后一题」并提交，qTotal=' in H,
+   'J1 日志说明：本地最大题数 X → N（宿主按这个数判定最后一题并提交，qTotal=N）')
+ok('if (perSubject > 0) return perSubject;' in H and 'capText()' in H,
+   'J2 每学科打几局(>0) 优先于「无限刷/每学科次数」—— 填 1 就只打一局')
+ok('isChallengeUnlimited()) return Integer.MAX_VALUE' in H,
+   'J2 该值为 0 时：开无限刷=不限，没开=用每学科次数')
+ok('每学科打几局(0=不限)' in A and '只有一个学科时会打一局就停' in A,
+   'J2 面板文案改成「每学科打几局(0=不限)」并写明只有一个学科时会停')
+ok('本学科已打 ' in H and '全部完成，标记今日完成并停止' in H,
+   'J2 每次判定都打日志说明「打成几局/共几个学科/为什么停」')
+
+print("J3 结算路径镜像（本地最大题数）")
+
+
+def settles(local_total_after, pos):
+    """镜像：本地最大题数被改成 N 后，宿主在第 pos 题（0 基）即认为到最后一题"""
+    return pos >= local_total_after - 1
+
+
+ok(settles(20, 19) is True, 'J3 本地总题数=20 → 第 20 题（pos 19）宿主即认定最后一题 → 正常提交结算')
+ok(settles(20, 18) is False, 'J3 第 19 题还没到 → 继续答')
+ok(settles(3, 2) is True, 'J3 本地总题数=3 → 第 3 题结算')
+
 print("D. 版本与产物")
-ok('VERSION = "v4.8q"' in C, 'D1 XLModConfig.VERSION = v4.8p')
+ok('VERSION = "v4.9p"' in C, 'D1 XLModConfig.VERSION = v4.9p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -437,9 +465,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.8q'), 'D2 APK 内含版本号 v4.8q（密文解回原文）')
+    ok(has('v4.9p'), 'D2 APK 内含版本号 v4.9p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
