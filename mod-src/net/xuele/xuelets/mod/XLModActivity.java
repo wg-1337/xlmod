@@ -823,18 +823,25 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 refreshBankStatus();
             }
         });
-        actionButton(cardChallenge, "清空题库", false, new View.OnClickListener() {
+        actionButton(cardChallenge, "清空题库 + 知识库（两处都清）", false, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 new AlertDialog.Builder(XLModActivity.this)
                         .setTitle("清空题库")
-                        .setMessage("将删除本机记录的全部对战题目（含正确答案）。确定继续？")
-                        .setPositiveButton("清空", new DialogInterface.OnClickListener() {
+                        .setMessage("将删除两处记录：\n① 题库文件 xlmod_qbank.json（下载目录）\n② 知识库 xlmod_cfg.xml 里的 kb_ 键\n"
+                                + "（旧版本把「学生作答内容」当标准答案写进了知识库，只清①的话脏答案还会被继续使用）\n\n确定继续？")
+                        .setPositiveButton("全部清空", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface d, int w) {
-                                XLModBank.clear();
+                                int bankBefore = XLModBank.size();
+                                int kbBefore = XLModConfig.kbCount();
+                                XLModBank.clear();               // ① 题库 JSON（下载目录 / 私有目录）
+                                int kbCleared = XLModConfig.kbClearAll();   // ② 知识库 kb_ 键（xlmod_cfg.xml）
+                                XLModHelper.clearAnswerCaches();  // ③ 本次运行的内存缓存
                                 refreshBankStatus();
-                                Toast.makeText(XLModActivity.this, "题库已清空", Toast.LENGTH_SHORT).show();
+                                Toast.makeText(XLModActivity.this,
+                                        "已清空：题库 " + bankBefore + " 题、知识库 " + kbBefore + " 条（kb " + kbCleared + "）",
+                                        Toast.LENGTH_LONG).show();
                             }
                         })
                         .setNegativeButton("取消", null)
@@ -1079,7 +1086,11 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
 
     private void refreshBankStatus() {
         try {
-            if (sBankStatusView != null) sBankStatusView.setText(XLModBank.statsText());
+            if (sBankStatusView != null) {
+                sBankStatusView.setText(XLModBank.statsText()
+                        + "\n知识库(xlmod_cfg.xml)：kb_ 键 " + XLModConfig.kbCount() + " 条"
+                        + "（清空题库会连它一起清）");
+            }
         } catch (Throwable ignored) {
         }
     }

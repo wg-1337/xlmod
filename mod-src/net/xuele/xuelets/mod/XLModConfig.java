@@ -672,7 +672,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v5.0p";
+    public static final String VERSION = "v5.0q";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -998,6 +998,51 @@ public class XLModConfig {
     public static String kbGet(String key) {
         if (key == null || key.isEmpty()) return "";
         return s("kb_" + key, "");
+    }
+
+    /** 知识库里已记了多少题（面板显示用） */
+    public static int kbCount() {
+        try {
+            SharedPreferences p = p();
+            if (p == null) return 0;
+            int n = 0;
+            for (String k : p.getAll().keySet()) {
+                if (k != null && k.startsWith("kb_")) n++;
+            }
+            return n;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /**
+     * V5.0q：**清空知识库**（{@code xlmod_cfg.xml} 里所有 {@code kb_*} 键）。
+     *
+     * <p>为什么必须一起清：题库（{@code xlmod_qbank.json}）与知识库是**两套存储** ——
+     * 旧版本把"学生作答内容（自动打时就是我们盲填的）"当成标准答案写进了 {@code kb_}（{@code F|}/{@code S|}/{@code L|}），
+     * 只清题库文件的话，这些脏数据还会继续被 {@code applyKb()} 当成答案用。</p>
+     *
+     * @return 清掉的键数量
+     */
+    public static int kbClearAll() {
+        try {
+            SharedPreferences p = p();
+            if (p == null) return 0;
+            SharedPreferences.Editor ed = p.edit();
+            int n = 0;
+            for (String k : new java.util.ArrayList<String>(p.getAll().keySet())) {
+                if (k != null && k.startsWith("kb_")) {
+                    ed.remove(k);
+                    n++;
+                }
+            }
+            ed.apply();
+            wb("kb_junk_purged_v46", false);          // 以后需要再清垃圾时还能再跑一次
+            logAppend("[题库] 已清空知识库（xlmod_cfg.xml 里的 kb_ 键）: " + n + " 条");
+            return n;
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     /**

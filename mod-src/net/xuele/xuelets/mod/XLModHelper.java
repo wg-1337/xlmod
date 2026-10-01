@@ -4710,6 +4710,22 @@ public class XLModHelper {
         }
     }
 
+    /**
+     * V5.0q：清空"答案类"内存缓存（题库/知识库清空时必须一起清，否则本次运行仍会用旧答案）。
+     */
+    public static void clearAnswerCaches() {
+        try {
+            int a = sDetailMap.size();
+            sDetailMap.clear();
+            int b = sDetailListenText.size();
+            sDetailListenText.clear();
+            int c = sApiRightIds.size();
+            sApiRightIds.clear();
+            trace("[题库] 已清空答案内存缓存：详情 " + a + " 题、听力 " + b + " 条、判题接口 " + c + " 条");
+        } catch (Throwable t) {
+        }
+    }
+
     private static String shortId(String s) {        if (s == null) return "";
         return s.length() > 14 ? s.substring(0, 14) + "…" : s;
     }

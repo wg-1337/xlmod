@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V5.0p 全部新功能：
+"""验证 V5.0q 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -636,8 +636,49 @@ ok(true_answer_fill(answers) == ['三', '一', '二'],
 ok(old_wrong_fill(answers) == ['不会', '不会', ''],
    'N4 旧实现取 sContent → 不会,不会,(空) ← 这就是填空必然全错的原因')
 
+print("O. 清空两处存储：题库 JSON + 知识库 xlmod_cfg.xml（V5.0q）")
+ok('public static int kbClearAll()' in C and 'xlmod_cfg.xml' in C,
+   'O1 新增 kbClearAll()：删除 xlmod_cfg.xml 里所有 kb_ 键')
+ok('ed.remove(k);' in C and "k.startsWith(\"kb_\")" in C,
+   'O1 按前缀 kb_ 逐个移除（F|/S|/L| 三种旧格式都覆盖）')
+ok('public static int kbCount()' in C,
+   'O1 新增 kbCount()：面板能显示知识库还有多少条')
+ok('XLModConfig.kbClearAll()' in A and 'XLModBank.clear()' in A,
+   'O2 面板「清空题库 + 知识库」按钮同时调用两处清空')
+ok('XLModHelper.clearAnswerCaches()' in A and 'public static void clearAnswerCaches()' in H,
+   'O2 同时清掉本次运行的内存缓存（详情/听力/判题接口）')
+ok('kb_ 键 ' in A and '清空题库会连它一起清' in A,
+   'O2 面板状态行显示知识库条数，避免再出现"以为清了其实没清"')
+ok('已清空：题库 ' in A and '知识库 ' in A,
+   'O2 清空后 Toast 报告两处的数量')
+ok('sDetailMap.clear()' in H and 'sDetailListenText.clear()' in H and 'sApiRightIds.clear()' in H,
+   'O3 clearAnswerCaches 清三个缓存（否则本次运行还会用旧答案）')
+ok('kb_junk_purged_v46' in C and 'wb("kb_junk_purged_v46", false)' in C,
+   'O3 清空知识库时复位一次性清理标记（以后还能再跑一次垃圾清理）')
+ok('xlmod_qbank.json' in A and 'xlmod_cfg.xml' in A,
+   'O3 弹窗文案写明清哪两处存储')
+
+print("O4 清空覆盖范围镜像")
+
+
+def clear_all(bank_file, prefs):
+    """镜像清空逻辑：题库文件内容清空 + 所有 kb_ 前缀键删除"""
+    bank_file = {}
+    prefs = {k: v for k, v in prefs.items() if not k.startswith('kb_')}
+    return bank_file, prefs
+
+
+prefs = {'kb_q1': 'F|b1=三', 'kb_q2': 'S|a2', 'kb_q3': 'L|hello',
+         'privacy_mode': 1, 'admin_unlocked': True, 'challenge_start_time': '08:00'}
+bank, prefs2 = clear_all({'q1': {}, 'q2': {}}, prefs)
+ok(len(bank) == 0, 'O4 题库文件清空')
+ok(not [k for k in prefs2 if k.startswith('kb_')], 'O4 知识库 kb_ 键全部清掉')
+ok(prefs2.get('privacy_mode') == 1 and prefs2.get('admin_unlocked') is True
+   and prefs2.get('challenge_start_time') == '08:00',
+   'O4 其它配置（隐私/管理员解锁/开始时间）不受影响')
+
 print('D. 版本与产物')
-ok('VERSION = "v5.0p"' in C, 'D1 XLModConfig.VERSION = v5.0p')
+ok('VERSION = "v5.0q"' in C, 'D1 XLModConfig.VERSION = v5.0q')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -668,7 +709,7 @@ if os.path.exists(APK):
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
                    u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数', u'已撤下', u'权威答案入库', u'收录题目'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v5.0p'), 'D2 APK 内含版本号 v5.0p（密文解回原文）')
+    ok(has('v5.0q'), 'D2 APK 内含版本号 v5.0q（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
