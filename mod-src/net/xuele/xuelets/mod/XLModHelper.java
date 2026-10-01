@@ -3820,6 +3820,90 @@ public class XLModHelper {
         }
     }
 
+    /**
+     * V5.0p（内修订）：把填空答案**按空位ID写进真实输入框**。
+     *
+     * <p>宿主填空题（{@code ChallengeFillQuestionFragment}）：</p>
+     * <ul>
+     *   <li>输入框表 {@code mInputMagicEditTextMap: LinkedHashMap<answerId, MagicLatexEditText>}（按空位ID索引）；</li>
+     *   <li>用户输入表 {@code mUserInputTextList: HashMap<answerId, String>}；</li>
+     *   <li>提交时 {@code generateCorrectModel()} 按 {@code mServerAnswerList[i].answerId} ← {@code answerContentList[i]} 配对；</li>
+     *   <li>任一输入框有改动，TextWatcher 会用 {@code getRealText()} 重建 {@code answerContentList}。</li>
+     * </ul>
+     * 所以我们既要把答案按位次写进 {@code answerContentList}（本次由题库/详情完成），也要把文本真正填进输入框，
+     * 这样提交走的就是"用户手打"的同一条路径（{@code getRealText()} 的转义也和手打一致）。
+     */
+    private static void fillFillBoxes(Activity act, M_ChallengeQuestion q) {
+        try {
+            if (act == null || q == null || q.answers == null || q.answers.isEmpty()) return;
+            Object frag = currentFragment(act);
+            if (frag == null) return;
+            Object boxMap = getFieldValue(frag, "mInputMagicEditTextMap");
+            if (!(boxMap instanceof java.util.Map)) return;                // 不是填空题页面
+            Object textMap = getFieldValue(frag, "mUserInputTextList");
+            java.util.Map boxes = (java.util.Map) boxMap;
+            java.util.Map texts = (textMap instanceof java.util.Map) ? (java.util.Map) textMap : null;
+            // 从"当前题目的 view 层答案"取值：这里用调用方已经算好的 answerContentList
+            Object uaObj = getFieldValue(frag, "mUserAnswer");
+            java.util.List vals = null;
+            if (uaObj != null) {
+                Object l = getFieldValue(uaObj, "answerContentList");
+                if (l instanceof java.util.List) vals = (java.util.List) l;
+            }
+            if (vals == null || vals.isEmpty()) return;
+            int filled = 0;
+            for (int i = 0; i < q.answers.size(); i++) {
+                AnswersBean a = q.answers.get(i);
+                if (a == null || a.answerId == null) continue;
+                String bid = a.answerId.trim();
+                String txt = (i < vals.size() && vals.get(i) != null) ? String.valueOf(vals.get(i)) : "";
+                if (txt.isEmpty()) continue;
+                if (texts != null) texts.put(bid, txt);
+                Object box = boxes.get(bid);
+                if (box instanceof android.widget.EditText) {
+                    android.widget.EditText et = (android.widget.EditText) box;
+                    if (!txt.equals(readEditText(et))) {
+                        et.setText(txt);
+                        filled++;
+                    }
+                }
+            }
+            if (filled > 0) trace("[填空] 已把 " + filled + " 个空位写进输入框（按空位ID）");
+        } catch (Throwable t) {
+            trace("[填空] 写入输入框异常: " + t);
+        }
+    }
+
+    /**
+     * V5.0p（内修订）：填空题"补空" —— 题库/详情只给出一部分空位时，剩下的用盲填内容补上，
+     * 否则宿主的 {@code checkUserAnswered} 会判"未作答"（要求所有空位都非空）。
+     */
+    private static void topUpFillBlanks(M_ChallengeQuestion q, ChallengeUserAnswer ua) {
+        try {
+            if (q == null || ua == null) return;
+            if (parseQType(q) != QT_FILL) return;
+            if (!XLModConfig.isBlindFallback()) return;
+            if (XLModConfig.sAutoEngineActive != 1) return;
+            if (q.answers == null || q.answers.isEmpty()) return;
+            if (ua.answerContentList == null) return;
+            while (ua.answerContentList.size() < q.answers.size()) ua.answerContentList.add("");
+            String blind = XLModConfig.getBlindFillText();
+            if (blind == null || blind.trim().isEmpty()) blind = "不会";
+            int filled = 0;
+            for (int i = 0; i < ua.answerContentList.size(); i++) {
+                String s = ua.answerContentList.get(i);
+                if (s == null || s.trim().isEmpty()) {
+                    ua.answerContentList.set(i, blind);
+                    filled++;
+                }
+            }
+            if (filled > 0) {
+                trace("[填空] 有 " + filled + " 个空位没有答案 → 用盲填内容补齐（避免判未作答）");
+            }
+        } catch (Throwable t) {
+        }
+    }
+
     private static String joinList(java.util.List<String> list) {
         StringBuilder sb = new StringBuilder();
         for (String s : list) {
@@ -4528,15 +4612,23 @@ public class XLModHelper {
                                             net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(qi);
                                             if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
                                                 XLModBank.putFillFromDetail(q.questionId,
-                                                        new java.util.ArrayList<String>(u.answerContentList));
+                                                        new java.util.ArrayList<String>(u.answerContentList),
+                                                        new java.util.ArrayList<String>(u.answerIdList));   // V5.0p：连空位ID一起存
+                                                // V5.0p：写成 "F|空位ID=答案\u0001..."，作答时按空位ID对位（不再靠位次）
                                                 StringBuilder fb = new StringBuilder("F|");
                                                 boolean any = false;
+                                                int bn = 0;
                                                 for (int bi = 0; bi < u.answerContentList.size(); bi++) {
                                                     String s = u.answerContentList.get(bi);
                                                     if (XLModBank.isJunk(s)) continue;
-                                                    if (bi > 0) fb.append("\u0001");
+                                                    String bid = (u.answerIdList != null && bi < u.answerIdList.size()
+                                                            && u.answerIdList.get(bi) != null)
+                                                            ? u.answerIdList.get(bi).trim() : "";
+                                                    if (bn > 0) fb.append("\u0001");
+                                                    if (!bid.isEmpty()) fb.append(bid).append('=');
                                                     fb.append(s.trim());
                                                     any = true;
+                                                    bn++;
                                                 }
                                                 if (any) XLModConfig.kbPut(q.questionId, fb.toString());
                                             }
@@ -4560,10 +4652,14 @@ public class XLModHelper {
                                             }
                                         }
                                         if (!any) continue;
+                                        // V5.0p：带空位ID写入（作答时按 ID 对位，避免顺序变化导致整题错位）
                                         StringBuilder sb = new StringBuilder("F|");
                                         for (int i = 0; i < ans.size(); i++) {
+                                            AnswersBean a = ans.get(i);
+                                            String bid = (a.answerId == null) ? "" : a.answerId.trim();
                                             if (i > 0) sb.append("\u0001");
-                                            sb.append(ans.get(i).answerContent == null ? "" : ans.get(i).answerContent);
+                                            if (!bid.isEmpty()) sb.append(bid).append('=');
+                                            sb.append(a.answerContent == null ? "" : a.answerContent);
                                         }
                                         XLModConfig.kbPut(q.questionId, sb.toString());
                                     } else {
@@ -4754,9 +4850,41 @@ public class XLModHelper {
                 if (parts.length == 0) return false;
                 ua.answerIdList.clear();
                 ua.answerContentList.clear();
-                for (String p : parts) {
-                    ua.answerContentList.add(p == null ? "" : p);
+                // V5.0p（内修订）：新格式 "F|空位ID=答案\u0001..." → 按空位ID对位（旧格式只有文本，只能按位次）
+                boolean withIds = parts.length > 0 && parts[0] != null && parts[0].indexOf('=') > 0
+                        && q.answers != null && !q.answers.isEmpty();
+                if (withIds) {
+                    java.util.HashMap<String, String> byId = new java.util.HashMap<String, String>();
+                    for (String p : parts) {
+                        if (p == null) continue;
+                        int eq = p.indexOf('=');
+                        if (eq <= 0) continue;
+                        String id = p.substring(0, eq).trim();
+                        String txt = p.substring(eq + 1);
+                        if (id.isEmpty() || XLModBank.isJunk(txt)) continue;
+                        byId.put(id, txt);
+                    }
+                    int hit = 0;
+                    for (AnswersBean a : q.answers) {
+                        String id = (a == null || a.answerId == null) ? "" : a.answerId.trim();
+                        String txt = byId.get(id);
+                        if (txt != null) hit++;
+                        ua.answerContentList.add(txt == null ? "" : txt);
+                    }
+                    if (hit > 0) {
+                        trace("[填空] 知识库按空位ID对位作答: " + qid + " → " + hit + "/" + q.answers.size() + " 空命中");
+                        return true;
+                    }
+                    ua.answerContentList.clear();
                 }
+                for (String p : parts) {
+                    // 旧格式兜底：若带 "=",取等号后面的文本
+                    String txt = p == null ? "" : p;
+                    int eq = txt.indexOf('=');
+                    if (eq > 0) txt = txt.substring(eq + 1);
+                    ua.answerContentList.add(txt);
+                }
+                trace("[填空] 知识库按位次作答（旧格式）: " + qid + "  ⚠顺序未必与本题一致");
                 return true;
             }
         } catch (Throwable t) {
@@ -4769,6 +4897,29 @@ public class XLModHelper {
      * 解决普通挑战本地无 isCorrect 时自动作答失效的问题。
      */
     public static ChallengeUserAnswer applyApiAnswers(M_ChallengeQuestion q, ChallengeUserAnswer ua) {
+        ChallengeUserAnswer r = applyApiAnswersInner(q, ua);
+        // V5.0p（内修订）：填空题收尾 —— ① 没答案的空位用盲填补齐（否则判未作答）；
+        // ② 把答案按空位ID真正写进输入框（与手打同一条提交路径）
+        try {
+            topUpFillBlanks(q, r);
+            if (parseQType(q) == QT_FILL) fillFillBoxes(currentAct(), q);
+        } catch (Throwable ignored) {
+        }
+        return r;
+    }
+
+    /** 最近一次题目显示所在的 Activity（填空题写输入框时要用） */
+    private static java.lang.ref.WeakReference<Activity> sLastActRef;
+
+    private static Activity currentAct() {
+        try {
+            return sLastActRef == null ? null : sLastActRef.get();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static ChallengeUserAnswer applyApiAnswersInner(M_ChallengeQuestion q, ChallengeUserAnswer ua) {
         if (!XLModConfig.isAutoAnswer()) {
             // V4.4p：没开"自动作答"但自动打榜在跑 → 至少做盲答兜底（否则会空着交卷卡住流程）
             applyBlindFallback(q, ua);
@@ -5376,6 +5527,10 @@ public class XLModHelper {
 
     public static void showAnswerFloat(Activity act, net.xuele.xuelets.challenge.util.ChallengeParamHelper ph, int pos) {
         XLModConfig.init(act);
+        try {
+            sLastActRef = new java.lang.ref.WeakReference<Activity>(act);   // V5.0p：填空题写输入框要用
+        } catch (Throwable ignored) {
+        }
         autoOnQuestionShown(act);
         if (act == null || ph == null) return;
         // ===== V4.3p：记录对战学科 + 同学对战整题入库（题库）=====
@@ -5753,7 +5908,8 @@ public class XLModHelper {
                                         net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(i);
                                         if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
                                             XLModBank.putFillFromDetail(q.questionId,
-                                                    new java.util.ArrayList<String>(u.answerContentList));
+                                                    new java.util.ArrayList<String>(u.answerContentList),
+                                                    new java.util.ArrayList<String>(u.answerIdList));   // V5.0p：连空位ID一起存
                                         }
                                     }
                                 }

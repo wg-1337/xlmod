@@ -165,6 +165,7 @@ public final class XLModBank {
             JSONArray right = new JSONArray();
             JSONArray fill = new JSONArray();
             List<AnswersBean> ans = q.answers;
+            JSONArray fillIds = new JSONArray();
             if (ans != null) {
                 for (int i = 0; i < ans.size(); i++) {
                     AnswersBean a = ans.get(i);
@@ -178,6 +179,7 @@ public final class XLModBank {
                     if (correct) right.put(i);
                     if ((type == QT_FILL || type == QT_LISTEN) && correct && !isJunk(a.answerContent)) {
                         fill.put(a.answerContent.trim());    // 只有带正确标记的文本才收
+                        fillIds.put(a.answerId == null ? "" : a.answerId);
                     }
                 }
             }
@@ -188,6 +190,8 @@ public final class XLModBank {
                     return false;
                 }
                 e.put("f", fill);
+                // V5.0p（内修订）：把每个空位的 answerId 一起存下 —— 作答时按空位ID对位，而不是按位次
+                e.put("fa", fillIds);
             } else if (type == QT_LISTEN) {
                 if (fill.length() == 0) {
                     noteQuestion(q, src);
@@ -256,13 +260,29 @@ public final class XLModBank {
 
     /** V4.6p：填空题(3)标准答案入库（来源=详情答案映射 answerContentList，即每空的 sContent） */
     public static void putFillFromDetail(String qid, java.util.List<String> texts) {
+        putFillFromDetail(qid, texts, null);
+    }
+
+    /**
+     * V5.0p（内修订）：填空题(3)标准答案入库，**连同每个空位的 answerId**。
+     *
+     * <p>为什么必须存空位ID：宿主填空题是"按 answerId 找输入框、按 {@code mServerAnswerList} 顺序提交"的
+     * （{@code ChallengeFillQuestionFragment.mInputMagicEditTextMap} /
+     * {@code generateCorrectModel} 里 {@code mServerAnswerList[i].answerId} ← {@code answerContentList[i]}）。
+     * 只存文本、作答时按位次填，一旦空位顺序变了就会**整题错位**（这就是填空题百分百错的根因）。</p>
+     */
+    public static void putFillFromDetail(String qid, java.util.List<String> texts, java.util.List<String> ids) {
         try {
             if (!enabled() || qid == null || qid.trim().isEmpty()) return;
             if (texts == null || texts.isEmpty()) return;
             JSONArray f = new JSONArray();
-            for (String s : texts) {
+            JSONArray fa = new JSONArray();
+            for (int i = 0; i < texts.size(); i++) {
+                String s = texts.get(i);
                 if (isJunk(s)) return;                      // 有一空是垃圾就整题不记（宁缺勿错）
                 f.put(s.trim());
+                String id = (ids != null && i < ids.size() && ids.get(i) != null) ? ids.get(i).trim() : "";
+                fa.put(id);
             }
             if (f.length() == 0) return;
             JSONObject e = sById.get(qid.trim());
@@ -275,6 +295,7 @@ public final class XLModBank {
             }
             if (e.optInt("t", 0) != QT_FILL) return;
             e.put("f", f);
+            if (fa.length() > 0) e.put("fa", fa);
             e.put("ts", System.currentTimeMillis());
             put(qid.trim(), e);
             save(false);
@@ -382,9 +403,39 @@ public final class XLModBank {
             if (type == QT_FILL) {
                 JSONArray f = e.optJSONArray("f");
                 if (f == null || f.length() == 0) return false;
-                ua.answerIdList.clear();
+                JSONArray fa = e.optJSONArray("fa");
                 ua.answerContentList.clear();
+                List<AnswersBean> blanks = q.answers;
+                if (fa != null && fa.length() > 0 && blanks != null && !blanks.isEmpty()) {
+                    // V5.0p（内修订）：**按空位ID对位**（宿主就是用 answerId 找输入框 / 提交的）
+                    java.util.HashMap<String, String> byBlankId = new java.util.HashMap<String, String>();
+                    for (int i = 0; i < f.length(); i++) {
+                        String bid = i < fa.length() ? fa.optString(i, "") : "";
+                        String txt = f.optString(i, "");
+                        if (bid == null || bid.trim().isEmpty() || isJunk(txt)) continue;
+                        byBlankId.put(bid.trim(), txt);
+                    }
+                    int hit = 0;
+                    for (int i = 0; i < blanks.size(); i++) {
+                        AnswersBean a = blanks.get(i);
+                        String bid = (a == null || a.answerId == null) ? "" : a.answerId.trim();
+                        String txt = byBlankId.get(bid);
+                        if (txt != null) hit++;
+                        ua.answerContentList.add(txt == null ? "" : txt);
+                    }
+                    if (hit > 0) {
+                        XLModConfig.logAppend("[填空] 按空位ID对位作答: " + qid + " → " + hit + "/" + blanks.size()
+                                + " 空命中（" + joinTexts(ua.answerContentList) + "）");
+                        return true;
+                    }
+                    XLModConfig.logAppend("[填空] ⚠空位ID一个都没对上（题库可能是旧格式）→ 回退按位次填，"
+                            + "若整题判错请清空题库重新采集: " + qid);
+                    ua.answerContentList.clear();
+                }
+                // 旧条目（没有 fa）：只能按位次填
                 for (int i = 0; i < f.length(); i++) ua.answerContentList.add(f.optString(i, ""));
+                XLModConfig.logAppend("[填空] 按位次作答（旧条目无空位ID）: " + qid + " → "
+                        + joinTexts(ua.answerContentList) + "  ⚠顺序未必与本题一致");
                 return true;
             }
             if (type == QT_LISTEN) {
@@ -561,8 +612,21 @@ public final class XLModBank {
         }
     }
 
-    private static String safeCut(String s, int n) {
-        if (s == null) return "";
+    /** V5.0p：日志用 —— 把填空答案串起来显示 */
+    private static String joinTexts(java.util.List<String> list) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            for (String s : list) {
+                if (sb.length() > 0) sb.append(" | ");
+                sb.append(s == null || s.isEmpty() ? "(空)" : s);
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private static String safeCut(String s, int n) {        if (s == null) return "";
         String t = s.trim();
         return t.length() > n ? t.substring(0, n) + "…" : t;
     }

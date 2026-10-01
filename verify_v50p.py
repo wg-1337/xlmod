@@ -555,6 +555,53 @@ e3 = {'i': 'zz', 'c': '不存在', 'd': '2', 'idx': 1}
 h4, w4 = match(e3, shuffled, by_sig=True)
 ok(h4 is None and w4 == '签名兜底不猜', 'L5 签名兜底 + 只能猜排序 → 放弃（不会猜错成 A/B）')
 
+print("M. 填空题按空位ID对位（V5.0p 内修订）")
+ok('public static void putFillFromDetail(String qid, java.util.List<String> texts, java.util.List<String> ids)' in B,
+   'M1 putFillFromDetail 支持连空位ID一起入库')
+ok('e.put("fa", fillIds);' in B and 'fillIds.put(a.answerId' in B,
+   'M1 题库里填空题答案带空位ID数组 fa')
+ok('new java.util.ArrayList<String>(u.answerIdList));' in H,
+   'M1 详情采集时把 answerIdList 一起交给题库')
+ok('按空位ID对位作答' in B and 'byBlankId' in B,
+   'M2 作答时按当前题目的空位ID取文本（而不是按位次）')
+ok('空位ID一个都没对上' in B and '按位次作答' in B,
+   'M2 ID 对不上时回退按位次并告警')
+ok('withIds' in H and '知识库按位次作答（旧格式）' in H,
+   'M3 知识库 F| 升级为「空位ID=答案」，读时优先按ID对位')
+ok("fb.append(bid).append('=')" in H and "sb.append(bid).append('=')" in H,
+   'M3 F| 两个写入点都带上空位ID')
+ok('fillFillBoxes' in H and 'mInputMagicEditTextMap' in H and 'mUserInputTextList' in H,
+   'M4 把答案按空位ID写进真实输入框')
+ok('et.setText(txt);' in H,
+   'M4 写框时读回校验')
+ok('topUpFillBlanks' in H,
+   'M5 没答案的空位用盲填补齐')
+ok('applyApiAnswersInner' in H and 'topUpFillBlanks(q, r);' in H,
+   'M5 作答主流程收尾统一调用')
+
+print("M6 对位算法镜像")
+
+
+def positional(recorded):
+    return list(recorded)
+
+
+def by_blank_id(recorded_ids, recorded, current_ids):
+    m = dict(zip(recorded_ids, recorded))
+    return [m.get(i, "") for i in current_ids]
+
+
+rec_ids = ['b1', 'b2', 'b3']
+rec_txt = ['一', '二', '三']
+cur_ids = ['b3', 'b1', 'b2']
+pos = positional(rec_txt)
+ide = by_blank_id(rec_ids, rec_txt, cur_ids)
+ok(pos == rec_txt and ide == ['三', '一', '二'],
+   'M6 空位顺序被打乱：按位次=全错（根因）；按空位ID=全对')
+ok(by_blank_id(rec_ids, rec_txt, rec_ids) == rec_txt, 'M6 顺序未变时两种方式都对')
+ok(by_blank_id(rec_ids, rec_txt, ['b9', 'b8']) == ['', ''],
+   'M6 ID 完全不同 → 不猜（留空，交给盲填补齐）')
+
 print('D. 版本与产物')
 ok('VERSION = "v5.0p"' in C, 'D1 XLModConfig.VERSION = v5.0p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
