@@ -3,14 +3,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
-"""一键发布加密授权（V4.3p）：seal -> 清理明文 -> 提交推送 -> 远程复验。
+"""一键发布授权（V4.3p）：bundle（配置+签名）→ 删仓库明文 → 提交推送 → 远程复验。
 
     python publish_license.py            # 完整流程
-    python publish_license.py --nopush   # 只本地加密/校验，不提交推送
+    python publish_license.py --nopush   # 只本地签发/校验，不提交推送
     python publish_license.py --edit     # 先打开 features.json 编辑
 
-产物：仓库根目录 `license.json`（**只有密文**：AES-256-CBC + ECDSA P-256）。
-仓库里不再有明文的 features.json / features.json.sig（脚本会自动删除它们）。
+工作方式（V4.3p）：
+  · 配置一直是**明文**（features.json，只在作者本地/工作区，方便你直接改）；
+  · 管理员密码也写在 features.json 里（admin_password），签发时换算成 PBKDF2 校验块；
+  · 仓库里只提交 `license.json`（payload = base64(配置) + 作者私钥签名）——**没有明文文件、没有密码明文**。
 """
 import io
 import json
@@ -37,8 +39,9 @@ def sh(args, cwd=None, check=False):
 
 
 def find_cfg():
-    """明文配置来源：仓库内 -> 工作区根 -> 上级目录 -> xlmod-config 副本"""
-    for p in (os.path.join(REPO, 'features.json'), 'features.json', os.path.join('..', 'features.json'),
+    """明文配置来源：工作区根 -> 仓库内 -> 上级目录 -> xlmod-config 副本"""
+    for p in ('features.json', os.path.join('..', 'features.json'),
+              os.path.join(REPO, 'features.json'),
               os.path.join('xlmod-config', 'features.json')):
         if os.path.exists(p):
             return p
@@ -51,31 +54,26 @@ def main():
     edit = '--edit' in args
 
     print('=' * 62)
-    print(' XLMod 加密授权发布 V4.3p')
+    print(' XLMod 授权发布 V4.3p（明文配置在你本地，仓库只收签名后的 license.json）')
     print('  仓库目录 : %s' % os.path.abspath(REPO))
     print('  是否推送 : %s' % ('否' if nopush else '是'))
     print('=' * 62)
 
     if not os.path.exists(sc.PRIV):
         raise SystemExit('找不到签名私钥：%s（私钥不进仓库）' % sc.PRIV)
-    if not os.path.exists(sc.MASTER):
-        raise SystemExit('找不到主密钥：%s\n先运行：python sign_config.py init-key' % sc.MASTER)
-    if not os.path.exists(sc.ADMIN_PW):
-        print('[提示] 没有 keys/admin_pw.txt：将签发一份"没有管理员密码块"的授权')
-        print('       要启用管理员解锁：python sign_config.py set-pw 你的密码')
 
     cfg = find_cfg()
     if edit:
-        print('[1/6] 打开记事本编辑 %s ...' % cfg)
+        print('[1/5] 打开记事本编辑 %s ...' % cfg)
         subprocess.run(['notepad', cfg])
     else:
-        print('[1/6] 使用配置 %s（要改内容：python publish_license.py --edit）' % cfg)
+        print('[1/5] 使用配置 %s（要改内容：python publish_license.py --edit）' % cfg)
 
-    print('[2/6] 加密 + 签名 -> %s/license.json' % REPO)
+    print('[2/5] 签发（配置 + 管理员校验块）-> %s/license.json' % REPO)
     out = os.path.join(REPO, 'license.json')
-    sc.seal(cfg, out)
+    sc.bundle(cfg, out)
 
-    print('[3/6] 清理仓库里的明文授权文件（V4.3p 起不再上传明文）')
+    print('[3/5] 清理仓库里的明文配置文件（V4.3p 起不再上传明文）')
     for name in PLAIN_LEGACY:
         p = os.path.join(REPO, name)
         if os.path.exists(p):
@@ -86,16 +84,17 @@ def main():
             io.open(out, encoding='utf-8').read())
         print('      已同步本地副本 xlmod-config/license.json')
 
-    print('[4/6] 本地自检')
+    print('[4/5] 本地自检（验签 + 摘要）')
     sc.check(out)
 
     if nopush:
-        print('[5/6] 跳过推送（--nopush）')
+        print('[4/5] 跳过推送（--nopush）')
     else:
-        print('[5/6] 提交并推送')
+        print('[4/5] 提交并推送')
         sh(['git', 'add', '-A'], cwd=REPO, check=True)
         if sh(['git', 'diff', '--cached', '--quiet'], cwd=REPO) != 0:
-            sh(['git', 'commit', '-m', '授权配置更新（V4.3p 加密授权：仓库只保留密文）'], cwd=REPO, check=True)
+            sh(['git', 'commit', '-m', '授权配置更新（V4.3p：明文配置仅本地，仓库只收签名后的 license.json）'],
+               cwd=REPO, check=True)
         else:
             print('      没有新改动需要提交')
         if sh(['git', 'push', 'origin', 'main'], cwd=REPO) != 0:
@@ -104,7 +103,7 @@ def main():
         else:
             print('      推送成功')
 
-    print('[6/6] 远程复验')
+    print('[5/5] 远程复验')
     tmp = os.path.join(REPO, '_remote_license.json')
     ok = False
     for cmd in (['curl', '-sS', '-m', '60', '-o', tmp, RAW_URL],
@@ -116,10 +115,9 @@ def main():
         print('      [警告] 远端下载失败，稍后可重跑本脚本复验')
     else:
         try:
-            sc.check(tmp)
-            local = json.load(io.open(out, encoding='utf-8'))
-            remote = json.load(io.open(tmp, encoding='utf-8'))
-            same = local.get('enc') == remote.get('enc')
+            sc.check(tmp, quiet=True)
+            same = (json.load(io.open(out, encoding='utf-8')).get('payload')
+                    == json.load(io.open(tmp, encoding='utf-8')).get('payload'))
             print('      %s' % ('=> 一致：远端已是最新授权（端上最长 60 秒内生效）' if same
                                 else '=> 不一致：远端还是旧版本（CDN 缓存一般 5 分钟内刷新）'))
         except SystemExit:

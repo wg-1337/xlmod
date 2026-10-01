@@ -12,10 +12,9 @@
 
 * 目标是学乐云客户端（`net.xuele.xuelets` 5.9.22）的增强模块，通过**反编译 → 改 smali 注入点 → 重打包**实现。
 * **两部分代码**（务必分清）：
-  * **开源部分**：`mod-src/**`（我们写的 Java）、`guard-src/**`、构建/验证脚本、`docs/**`、`license.json`（**只有密文**）—— 全部在仓库里；
+  * **开源部分**：`mod-src/**`（我们写的 Java）、`guard-src/**`、构建/验证脚本、`docs/**`、`license.json`（配置+签名）—— 全部在仓库里；
   * **闭源部分**：宿主 App 的 smali 注入骨架（`apktool-out/**`，含原版代码）—— **不进仓库**，只在 `docs/INJECTION_POINTS.md` 里给低粒度说明；
-  * **本地私密部分**（绝不进仓库）：签名私钥 `keys/*_private.pem`、授权主密钥 `keys/license_key.txt`、
-    管理员密码 `keys/admin_pw.txt`、明文配置 `features.json`。
+  * **本地私密部分**（绝不进仓库）：签名私钥 `keys/*_private.pem`、明文配置 `features.json`（含管理员密码字段）。
 * **dex 布局**（9 个，索引必须连续，ART 只加载到第一个缺口）：
   | dex | 内容 |
   |---|---|
@@ -57,8 +56,8 @@
 |---|---|---|---|
 | **面板 UI / 文案 / 分区** | `mod-src/.../XLModActivity.java` | 若新增功能区 → `XLModFeatures.IDS`、明文 `features.json`（本地）、`docs/REMOTE_CONFIG.md` | 快速构建；`grep` 新控件存在 |
 | **新增/修改配置项** | `mod-src/.../XLModConfig.java`（`b()/i()/s()` + getter/setter） | 面板加控件；如需 smali 读 → 加 public static 字段 + `obf-rules.pro` | 快速构建 |
-| **云端授权开关（含加密授权）** | `mod-src/.../XLModFeatures.java`（验签 + AES 解密 + 管理员校验块）、`mod-src/.../XLModCrypto.java`、`mod-src/.../XLModSecrets.java`（**仓库里是占位主密钥**） | 明文 `features.json`（本地）→ `sign_config.py init-key/set-pw/seal` → 仓库只提交 `license.json`；`publish_license.py` / `update_license.bat`、`docs/REMOTE_CONFIG.md` | `verify_v43p.py`（A 组）+ `verify_remote_lock.py` + 远端 raw 比对 |
-| **管理员解锁（密码随授权加密）** | `mod-src/.../XLModFeatures.java`（`verifyAdminPassword` / `adminVerifierReady`）、`XLModConfig`（`admin_unlocked` / salt/iters/hash 缓存） | 面板「管理员解锁」卡片；签发侧 `sign_config.py set-pw`（密码只进 `keys/admin_pw.txt`，进密文里的 PBKDF2 块） | `verify_v43p.py`（A1/A2/A3）+ `sign_config.py verify-pw` |
+| **云端授权开关** | `mod-src/.../XLModFeatures.java`（验签 + 公告 + 管理员放行）、`XLModCrypto.java`（PBKDF2/MD5） | 明文 `features.json`（本地，含 `admin_password`）→ `sign_config.py bundle` → 仓库只提交 `license.json`；`publish_license.py` / `update_license.bat`、`docs/REMOTE_CONFIG.md` | `verify_v43p.py`（A 组）+ `verify_remote_lock.py` + 远端 raw 比对 |
+| **管理员解锁（配置字段）** | `mod-src/.../XLModFeatures.java`（`loadAdminVerifier` / `verifyAdminPassword` / `adminVerifierReady`）、`XLModConfig`（`admin_unlocked`） | 面板「管理员解锁」卡片；签发侧 `sign_config.py set-pw`（密码只在本地明文配置里，payload 里只有 PBKDF2 块） | `verify_v43p.py`（A1/A2/A3）+ `sign_config.py verify-pw` |
 | **打榜学科（记录 + 每次可选）** | `mod-src/.../XLModConfig.java`（`known_subjects` / `challenge_selected_subjects` / `last_battle_subject`）、`XLModHelper.java`（每题显示登记、榜页 Intent、结果页 monthSubject、`filterSubjectsBySelection`） | 面板「自动打榜 → 每次要打的学科」勾选列表；引擎启动唯一入口 `startWithSubjects` 里过滤 | `verify_v43p.py`（B 组）；运行日志 `[打榜] 学科勾选` |
 | **题库（同学对战 → 普通挑战）** | `mod-src/.../XLModBank.java`（采集/匹配/落盘/导出）、`XLModHelper.java`（`harvestBattle` 接入、`buildAutoAnswer`/`applyApiAnswers` 接入、详情入库） | 面板「金榜题名 → 题库」开关/统计/导出/清空；落盘 `/sdcard/Download/xlmod_qbank.json` | `verify_v43p.py`（C 组，含选项乱序的算法镜像）；日志 `[题库]` 行 |
 | **隐私隐藏（设备信息）** | `mod-src/.../XLModHelper.java`（`sanitizeHeaders` / `cleanDeviceInfo`）、`XLModConfig`（privacy_*） | smali：请求头拦截器·intercept()、登录管理类·家长登录入口；`XLModFeatures.ALWAYS_ON` 必须含 `privacy` | `verify_privacy_v41.py` + `verify_privacy_independent.py` |
@@ -96,11 +95,12 @@
    所以配置一律以**单文件 `license.json`** 分发（配置+签名同文件，避免"新签名配旧配置"导致误锁）。
 10. **行尾/编码**：签名前会把配置规范成 LF（git 入库会转 LF，否则回退路径验签失败）；`.bat` 用 CRLF+UTF-8 BOM。
 11. **不要提交**：`apktool-out/`、`jadx-out/`、`*.apk|dex|smali`、`keys/*_private.pem`、
-    `keys/license_key.txt`（授权主密钥）、`keys/admin_pw.txt`（管理员密码）、`features.json*`（明文授权）
-    —— `.gitignore` 已覆盖，`precheck_push.py` 会逐项检查；授权只上密文 `license.json`。
-12. **管理员密码不在代码里**：它只以 PBKDF2 校验块的形式存在于**加密后**的 `license.json` 里；
-    端上对应逻辑是 `XLModCrypto.pbkdf2`（手写实现，minApi19 可用，与 Python `hashlib.pbkdf2_hmac('sha256')` 逐字节一致）。
-13. **换主密钥 / 换管理员密码都要重新 `seal` + 推送**，否则端上解不开或校验不过（保持锁定/无法解锁）。
+    `features.json*`（明文授权，含管理员密码字段）
+    —— `.gitignore` 已覆盖，`precheck_push.py` 会逐项检查；授权只上签名后的 `license.json`。
+12. **管理员密码明文只在你本地**：`features.json` 里的 `admin_password` 在签发时被换算成 PBKDF2 校验块，
+    上传的 payload 只有 `admin.hash`；端上对应逻辑是 `XLModCrypto.pbkdf2`（手写实现，minApi19 可用，
+    与 Python `hashlib.pbkdf2_hmac('sha256')` 逐字节一致）。
+13. **换管理员密码 / 改开关都要重新签发推送**（`python publish_license.py`），否则端上还是旧配置。
 
 ---
 
@@ -128,7 +128,7 @@ java -jar apktool/apktool.jar b -f -j 1 apktool-out -o xueleyun_mod_unsigned_ui.
 
 # ④ 验证（按改动挑，全部要跑一遍相关的）
 python verify_dex_interlock.py        # 互锁 + 密钥链
-python verify_v43p.py                 # V4.3p：加密授权/管理员解锁 + 学科可选 + 题库
+python verify_v43p.py                 # V4.3p：管理员密码（配置字段）+ 学科可选 + 题库
 python verify_remote_lock.py          # 授权语义（含签名）
 python verify_privacy_v41.py          # 隐私：请求头改写
 python verify_privacy_independent.py  # 隐私：不受云端影响

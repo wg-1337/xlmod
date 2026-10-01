@@ -6,10 +6,11 @@
 # -*- coding: utf-8 -*-
 """验证 V4.3p 三项新功能：
 
-A 管理员密码（与 license 一起加密；面板输入解锁全部功能）
-   A1 端上：管理员放行逻辑 / 加密授权解析 / 密码校验 / 面板入口 / 校验块缓存
-   A2 仓库：license.json 只有密文（无 features/notice/payload 明文）、验签通过、能解出 admin 块
-   A3 算法：Python seal 的密文能被 **mod 的真实 XLModCrypto 代码**（JDK 跑）解开（见 cross_check）
+A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
+   A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
+   A2 仓库：license.json 只有"配置+签名"单文件；payload 里**没有密码明文**、只有 PBKDF2 校验块；
+          本地 features.json 保留明文密码（方便用记事本改）
+   A3 回到旧方案：无 AES / 无主密钥 / 无 XLModSecrets
 B 学科记录与"每次要打的学科"
    B1 配置项（known/selected/last battle）
    B2 采集点（每题显示登记学科 / 榜页 Intent / 结果页 monthSubject）
@@ -57,60 +58,57 @@ A = read('mod-src/net/xuele/xuelets/mod/XLModActivity.java')
 C = read('mod-src/net/xuele/xuelets/mod/XLModConfig.java')
 B = read('mod-src/net/xuele/xuelets/mod/XLModBank.java')
 X = read('mod-src/net/xuele/xuelets/mod/XLModCrypto.java')
-S = read('mod-src/net/xuele/xuelets/mod/XLModSecrets.java')
 U = read('mod-src/net/xuele/xuelets/mod/XLModUpdate.java')
 
 print("=" * 68)
-print("A. 管理员密码 + 加密授权")
+print("A. 管理员密码（配置里的一个字段）+ 明文配置不上仓库")
 
 ok('XLModConfig.isAdminUnlocked()' in F and 'return true;   // 管理员密码解锁' in F,
    'A1 管理员已解锁时 enabled() 一律放行（优先于 features/kill/过期）')
 ok('isAdminUnlocked' in C and 'setAdminUnlocked' in C and 'admin_unlocked' in C,
    'A1 本地解锁标记持久化（SharedPreferences: admin_unlocked）')
-ok('setAdminVerifier' in F and 'getAdminSalt' in C and 'getAdminHash' in C and 'getAdminIters' in C,
-   'A1 授权里的管理员校验块（salt/iters/hash）缓存到本地（断网也能验）')
+ok('loadAdminVerifier' in F and 'sAdminHash' in F and 'sAdminPlain' in F,
+   'A1 授权里的管理员字段解析到内存（PBKDF2 校验块 / 明文两种都兼容）')
+ok('setAdminVerifier' not in F and 'setAdminVerifier' not in C and 'admin_hash' not in C,
+   'A1 密码校验块**不落盘**（只随授权在内存里，与"授权不落盘"一致）')
 ok('XLModCrypto.pbkdf2' in F and 'sameBytes' in F and 'PBKDF2-HMAC-SHA256' in X,
    'A1 密码校验 = 手写 PBKDF2-HMAC-SHA256（minApi19 可用，与 Python hashlib 一致）')
-ok('android.util.Base64.decode' in F and 'aesCbcDecrypt' in X and 'licenseKey' in X,
-   'A1 加密授权：base64 解码 + HMAC-SHA256 派生密钥 + AES-256-CBC（PKCS5）')
-ok('optString("enc", "")' in F and 'b.has("salt")' in F and 'b.has("payload")' in F,
-   'A1 解析 license 的 enc/salt 字段，并保留旧版 payload 兼容分支')
-ok('SIG_PREFIX' in F and 'XLModLic-v2' in F,
-   'A1 签名覆盖「前缀+salt+enc」（换 salt/换密文都不通过）')
+ok('optString("payload"' not in F and 'b.getString("payload")' in F and 'decryptLicense' not in F,
+   'A1 授权=旧方案单文件（payload + sig），没有加密/主密钥逻辑')
 ok('TYPE_TEXT_VARIATION_PASSWORD' in A and '管理员密码' in A,
    'A1 面板有管理员密码输入框（密码样式）')
 ok('解锁全部功能' in A and 'verifyAdminPassword' in A, 'A1 面板有「解锁全部功能」按钮并调用校验')
 ok('退出管理员模式' in A and 'setAdminUnlocked(false)' in A, 'A1 面板可退出管理员模式')
-ok('adminStatusText' in A and 'adminVerifierReady' in F, 'A1 面板显示管理员状态与校验块状态')
+ok('adminStatusText' in A and 'adminVerifierReady' in F, 'A1 面板显示管理员状态与授权字段状态')
 
 repo_lic = 'tmp-repo/license.json' if os.path.exists('tmp-repo/license.json') else 'license.json'
 raw_lic = read(repo_lic)
-ok('"enc"' in raw_lic and '"salt"' in raw_lic and '"sig"' in raw_lic, 'A2 license.json 是 V4.3p 加密格式（%s）' % repo_lic)
-for leak in ('"features"', '"notice"', '"payload"', 'identity', 'homework', 'admin'):
-    ok(leak not in raw_lic, 'A2 仓库里的 license.json 不含明文片段 %s' % leak)
 lic = json.loads(raw_lic)
-signed = sc.SIG_PREFIX + lic['salt'].encode('ascii') + b'|' + lic['enc'].encode('ascii')
-ok(sc._verify_bytes(signed, sc._b64d(lic['sig'])), 'A2 加密授权验签通过（ECDSA P-256，内置公钥）')
-master = sc.load_master(required=False)
-if master is None or not os.path.exists(sc.ADMIN_PW):
-    print("  [SKIP] A2/A3 本机没有 keys/license_key.txt 或 keys/admin_pw.txt（仓库里的占位密钥故意解不开）")
-    cfg, adm = {}, {}
-else:
-    blob = sc._b64d(lic['enc'])
-    plain = sc._openssl_dec(sc.derive_key(master, sc._b64d(lic['salt'])), blob[:16], blob[16:])
-    cfg = json.loads(plain.decode('utf-8'))
-    ok(bool(cfg.get('features')), 'A2 解密得到功能开关表：%d 项' % len(cfg.get('features') or {}))
-    adm = cfg.get('admin') or {}
-    ok(bool(adm.get('hash')) and adm.get('alg') == 'PBKDF2-HMAC-SHA256',
-       'A2 管理员密码以 PBKDF2 校验块形式**随授权一起加密**下发（%d 次迭代）' % adm.get('iters', 0))
-if adm:
-    pw = io.open(sc.ADMIN_PW, encoding='utf-8').read().strip()
-    got = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), sc._b64d(adm['salt']), int(adm['iters']), 32)
-    ok(hmac.compare_digest(got, sc._b64d(adm['hash'])), 'A2 本地管理员密码与授权里的校验块匹配')
-    wrong = hashlib.pbkdf2_hmac('sha256', (pw + 'x').encode('utf-8'), sc._b64d(adm['salt']), int(adm['iters']), 32)
-    ok(not hmac.compare_digest(wrong, sc._b64d(adm['hash'])), 'A2 错误密码不匹配（端上会拒绝解锁）')
-ok('LICENSE_KEY_HEX' in S, 'A3 端上主密钥常量存在（XLModSecrets.LICENSE_KEY_HEX）')
-ok(re.search(r'"[0-9a-fA-F]{64}"', S) is not None, 'A3 端上主密钥已写入（64 hex）')
+ok('payload' in lic and 'sig' in lic and 'enc' not in lic,
+   'A2 仓库里的 license.json 是"配置+签名"单文件（%s）' % repo_lic)
+ok('features.json' not in os.listdir('tmp-repo') if os.path.isdir('tmp-repo') else True,
+   'A2 仓库里没有明文 features.json（只上传签名后的 license.json）')
+payload, _sig = sc.payload_of(repo_lic)
+ptext = payload.decode('utf-8')
+ok('"features"' in ptext, 'A2 payload 解出功能开关表')
+ok('admin_password' not in ptext, 'A2 payload 里**不含密码明文**（admin_password 已被签发脚本剥离）')
+ok('"hash"' in ptext and '"salt"' in ptext, 'A2 payload 里只有 PBKDF2 校验块（admin.salt/hash）')
+local_cfg = json.load(io.open('features.json', encoding='utf-8'))
+ok(bool((local_cfg.get('admin_password') or '').strip()),
+   'A2 本地 features.json 里保留密码明文（你可以随时用记事本改）')
+pw = (local_cfg.get('admin_password') or '').strip()
+adm = (json.loads(ptext).get('admin') or {})
+got = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), base64.b64decode(adm['salt']), int(adm['iters']), 32)
+ok(hmac.compare_digest(got, base64.b64decode(adm['hash'])),
+   'A2 本地明文密码与授权里的校验块一致（端上输入该密码即可解锁）')
+wrong = hashlib.pbkdf2_hmac('sha256', (pw + 'x').encode('utf-8'), base64.b64decode(adm['salt']), int(adm['iters']), 32)
+ok(not hmac.compare_digest(wrong, base64.b64decode(adm['hash'])), 'A2 错误密码不匹配（端上会拒绝解锁）')
+ok(sc._verify_bytes(payload, _sig), 'A2 授权验签通过（ECDSA P-256，内置公钥）')
+ok('XlmodSecrets' not in os.listdir('mod-src/net/xuele/xuelets/mod')
+   or 'XLModSecrets.java' not in os.listdir('mod-src/net/xuele/xuelets/mod'),
+   'A3 加密方案的主密钥类 XLModSecrets.java 已删除（回到旧方案）')
+ok('XLModSecrets' not in X and 'licenseKey' not in X and 'aesCbcDecrypt' not in X,
+   'A3 XLModCrypto 只保留 PBKDF2/MD5（无 AES/主密钥）')
 
 print("B. 学科记录与「每次要打的学科」")
 ok('known_subjects' in C and 'addKnownSubject' in C and 'addKnownSubjects' in C,
@@ -214,18 +212,28 @@ if os.path.exists(APK):
         ok(idx == list(range(1, len(idx) + 1)), 'D2 dex 索引连续：%d 个（classes7=主逻辑，8/9=守卫）' % len(idx))
         d7 = z.read('classes7.dex')
     key = int(io.open('guard-key.txt').read().strip(), 0) & 0xFF
-    toks = re.findall(rb'[A-Za-z0-9+/]{16,}={0,2}', d7)
+    # dex 里密文串是"XOR+Base64"字面量：按最大 base64 段取出，再逐偏移尝试解码（长度前缀会粘进段里）
+    runs = re.findall(rb'[A-Za-z0-9+/=]{8,}', d7)
     found = set()
-    for t in toks:
-        try:
-            s = bytes(b ^ key for b in base64.b64decode(t)).decode('utf-8')
-        except Exception:
-            continue
-        found.add(s)
+    for r in runs:
+        for st in range(0, 4):
+            s = r[st:]
+            s = s[: len(s) - (len(s) % 4)] if len(s) % 4 else s
+            if len(s) < 8:
+                continue
+            try:
+                txt = bytes(b ^ key for b in base64.b64decode(s)).decode('utf-8')
+            except Exception:
+                continue
+            found.add(txt)
+
+    def has(phrase):
+        return any(phrase in s for s in found)
+
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
                    u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确'):
-        ok(phrase in found, 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok('v4.3p' in found, 'D2 APK 内含版本号 v4.3p（密文解回原文）')
+        ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
+    ok(has('v4.3p'), 'D2 APK 内含版本号 v4.3p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
@@ -235,4 +243,4 @@ if problems:
     for p in problems:
         print("  -", p)
     sys.exit(1)
-print("全部通过：管理员解锁（加密授权）/ 学科可选 / 题库作答 三项功能链路完整")
+print("全部通过：管理员解锁（配置字段 + 明文不上仓库）/ 学科可选 / 题库作答 三项功能链路完整")

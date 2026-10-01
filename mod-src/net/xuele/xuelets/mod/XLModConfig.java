@@ -883,8 +883,9 @@ public class XLModConfig {
     }
 
     // ============ 管理员解锁（V4.3p） ============
-    // 说明：管理员密码**不在代码里**——它的校验块（PBKDF2 盐+迭代数+哈希）随 license 一起加密下发，
-    // 端上只在内存/本地缓存校验块，输入正确即把本机标记为"管理员已解锁"（全部功能区放行）。
+    // 说明：管理员密码**不在代码里**，也不单独下发文件 —— 它就是配置（features.json）里的一个字段，
+    // 签发时被脚本换算成 PBKDF2 校验块写进签名后的 license.json（上传的只有校验块，没有密码明文）。
+    // 端上只在内存里保存校验块（与"授权不落盘"一致），输入正确即把本机标记为"管理员已解锁"。
 
     /** 管理员是否已解锁（本地标记；解锁后不受云端 features/kill/过期影响） */
     public static boolean isAdminUnlocked() {
@@ -895,30 +896,6 @@ public class XLModConfig {
         wb("admin_unlocked", v);
         setAdminUnlockAt(v ? System.currentTimeMillis() : 0L);
         logAppend("[管理员] 管理员模式 " + (v ? "已解锁（全部功能放行）" : "已退出"));
-    }
-
-    /** 缓存管理员校验块（license 解密成功后写入；断网也能验证） */
-    public static void setAdminVerifier(String saltB64, int iters, String hashB64) {
-        ws("admin_salt", saltB64 == null ? "" : saltB64);
-        wi("admin_iters", iters <= 0 ? 20000 : iters);
-        ws("admin_hash", hashB64 == null ? "" : hashB64);
-    }
-
-    public static String getAdminSalt() {
-        return s("admin_salt", "");
-    }
-
-    public static int getAdminIters() {
-        return i("admin_iters", 20000);
-    }
-
-    public static String getAdminHash() {
-        return s("admin_hash", "");
-    }
-
-    /** 是否有可用于校验的管理员密码块（= license 里的 admin 段是否已拿到） */
-    public static boolean hasAdminVerifier() {
-        return !getAdminSalt().isEmpty() && !getAdminHash().isEmpty();
     }
 
     /** 最近一次管理员解锁时间（诊断显示用） */

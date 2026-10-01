@@ -3,10 +3,10 @@
 ## 1. 本仓库包含什么
 
 * **XLMod 团队自行编写的全部代码**：`mod-src/**`（Java）、`guard-src/**`（由 `guard_gen.py` 生成）、
-  构建与验证脚本（`*.py`）、混淆规则（`*.pro`）、远程授权（`license.json`，**只有密文**）、设计文档（`docs/**`）。
+  构建与验证脚本（`*.py`）、混淆规则（`*.pro`）、远程授权（`license.json`：配置 + 签名）、设计文档（`docs/**`）。
 
-> 授权主密钥（`keys/license_key.txt`）、管理员密码（`keys/admin_pw.txt`）、签名私钥与明文配置
-> （`features.json`）属于部署方私有信息，**不在本仓库**：仓库里的 `license.json` 无法被解出明文。
+> 明文配置（`features.json`，含管理员密码字段）与签名私钥属于部署方私有信息，**不在本仓库**：
+> 仓库里的 `license.json` 只带 PBKDF2 密码校验块，没有密码明文。
 
 ## 2. 本仓库不包含什么（因版权原因）
 

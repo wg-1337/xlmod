@@ -11,15 +11,14 @@ package net.xuele.xuelets.mod;
 
 import java.security.MessageDigest;
 
-import javax.crypto.Cipher;
 import javax.crypto.Mac;
-import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * 轻量密码学工具（V4.3p 授权加密用）——只用 Android 自带 JCA，minSdk 19 可用。
+ * 轻量密码学工具——只用 Android 自带 JCA，minSdk 19 可用。
  *
- * <p>为什么不用 {@code SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")}：该算法在
+ * <p>用途：① 管理员密码校验（PBKDF2-HMAC-SHA256）；② 题库的内容指纹（MD5）。
+ * 为什么不用 {@code SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")}：该算法在
  * Android 8.1(API 27) 之前不存在，而本模块 minApi=19。这里用 HmacSHA256 手写 PBKDF2，
  * 与 Python 侧 {@code hashlib.pbkdf2_hmac('sha256', ...)} 结果逐字节一致。</p>
  *
@@ -54,30 +53,12 @@ public final class XLModCrypto {
 
     // ================= 摘要 / HMAC =================
 
-    public static byte[] sha256(byte[] data) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(data);
-        } catch (Throwable t) {
-            return new byte[0];
-        }
-    }
-
     public static String md5Hex(byte[] data) {
         try {
             byte[] d = MessageDigest.getInstance("MD5").digest(data);
             return bytesToHex(d);
         } catch (Throwable t) {
             return "";
-        }
-    }
-
-    public static byte[] hmacSha256(byte[] key, byte[] data) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(key, "HmacSHA256"));
-            return mac.doFinal(data);
-        } catch (Throwable t) {
-            return new byte[0];
         }
     }
 
@@ -111,36 +92,6 @@ public final class XLModCrypto {
             return dk;
         } catch (Throwable t) {
             return new byte[0];
-        }
-    }
-
-    // ================= AES-CBC =================
-
-    /** 授权解密密钥：HMAC-SHA256(主密钥, salt + 标签) → 32 字节（AES-256） */
-    public static byte[] licenseKey(byte[] salt) {
-        byte[] master = hexToBytes(XLModSecrets.LICENSE_KEY_HEX);
-        if (master.length == 0) return new byte[0];
-        byte[] label = null;
-        try {
-            label = "XLModLic-v2".getBytes("UTF-8");
-        } catch (Throwable t) {
-            label = new byte[0];
-        }
-        byte[] msg = new byte[salt.length + label.length];
-        System.arraycopy(salt, 0, msg, 0, salt.length);
-        System.arraycopy(label, 0, msg, salt.length, label.length);
-        return hmacSha256(master, msg);
-    }
-
-    /** AES-256-CBC 解密（PKCS5 填充）；失败返回 null */
-    public static byte[] aesCbcDecrypt(byte[] key, byte[] iv, byte[] ct) {
-        try {
-            if (key == null || key.length == 0 || iv == null || iv.length != 16 || ct == null) return null;
-            Cipher c = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new IvParameterSpec(iv));
-            return c.doFinal(ct);
-        } catch (Throwable t) {
-            return null;
         }
     }
 

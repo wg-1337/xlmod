@@ -1,18 +1,19 @@
 ﻿@echo off
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
-title XLMod 授权更新 V2.0（加密授权）
+title XLMod 授权更新 V2.1（明文配置 + 签名发布）
 
 rem ============================================================
-rem  XLMod 授权一键更新 V2.0（对应 Mod V4.3p 加密授权）
+rem  XLMod 授权一键更新 V2.1（对应 Mod V4.3p）
 rem
 rem  用法：
-rem    update_license.bat            加密 签名 校验 推送 远程复验
-rem    update_license.bat edit       先编辑 features.json 再执行
-rem    update_license.bat nopush     只做本地加密 校验
+rem    update_license.bat            签发 校验 推送 远程复验
+rem    update_license.bat edit       先编辑 features.json（明文）再执行
+rem    update_license.bat nopush     只做本地签发 校验
 rem
-rem  与 V1.x 的区别：仓库里只保留密文 license.json，
-rem  明文的 features.json 会从仓库删除（只在作者本地保留）。
+rem  说明：配置一直是明文（features.json，只在作者本地）；
+rem  管理员密码也写在里面（admin_password），签发时换算成校验块。
+rem  仓库里只提交签名后的 license.json（明文的 features.json 不上仓库）。
 rem  真正的流程在 publish_license.py 里，本脚本只负责找 python 与 openssl。
 rem ============================================================
 
@@ -25,7 +26,7 @@ if /i "%~2"=="edit"   set "EXTRA=--edit"
 if /i "%~2"=="nopush" set "EXTRA=--nopush"
 
 echo ============================================================
-echo  XLMod 授权更新 V2.0（加密授权）
+echo  XLMod 授权更新 V2.1（明文配置 + 签名发布）
 echo   脚本目录 : %WS%
 echo   参数     : %EXTRA%
 echo ============================================================

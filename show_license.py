@@ -4,9 +4,8 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 """打印 license.json（单文件授权）摘要：python show_license.py [文件]
 
-支持两种格式：
-  · V4.3p 加密授权 {"v":2,"salt","enc","sig"}（本机有主密钥才能看到明文，否则只显示"密文"信息）
-  · 旧版明文授权 {"payload","sig"}
+license.json = {"payload": base64(明文配置), "sig": base64(作者私钥签名)}
+明文配置里除功能开关/公告外，还有管理员密码字段（admin 校验块；密码明文只在本地 features.json）。
 """
 import io
 import json
@@ -17,20 +16,9 @@ import sign_config as sc
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else 'license.json'
-    o = json.load(io.open(path, encoding='utf-8'))
-    if 'enc' in o:
-        print('  格式    : 加密授权 V%s（%s）' % (o.get('v'), o.get('alg')))
-        print('  密文长度: %d 字符' % len(o.get('enc', '')))
-        master = sc.load_master(required=False)
-        if master is None:
-            print('  明文    : 本机没有主密钥 keys/license_key.txt，无法解密（这正是"仓库只有密文"的效果）')
-            return
-        blob = sc._b64d(o['enc'])
-        raw = sc._openssl_dec(sc.derive_key(master, sc._b64d(o['salt'])), blob[:16], blob[16:])
-        cfg = json.loads(raw.decode('utf-8'))
-    else:
-        print('  格式    : 明文授权（旧版；建议改用 python sign_config.py seal）')
-        cfg = json.loads(sc._b64d(o['payload']).decode('utf-8'))
+    payload, sig = sc.payload_of(path)
+    cfg = json.loads(payload.decode('utf-8'))
+    print('  单文件授权: %s（payload %d 字节 + 签名 %d 字节）' % (path, len(payload), len(sig)))
     print('  version : %s' % cfg.get('version'))
     print('  kill    : %s' % cfg.get('kill'))
     print('  有效期  : %s' % (cfg.get('expires') or '长期'))
@@ -38,9 +26,13 @@ def main():
     print('  开启项  : %s' % [k for k, v in (cfg.get('features') or {}).items() if v])
     print('  关闭项  : %s' % [k for k, v in (cfg.get('features') or {}).items() if not v])
     adm = cfg.get('admin') or {}
-    print('  管理员块: %s' % ('%s · %d 次迭代 · 盐 %s' % (adm.get('alg'), adm.get('iters', 0),
-                                                          (adm.get('salt') or '')[:12] + '…')
-                              if adm.get('hash') else '(无：端上不能解锁管理员模式)'))
+    if adm.get('hash'):
+        print('  管理员  : PBKDF2-HMAC-SHA256 · %d 次迭代 · 盐 %s…（无密码明文）'
+              % (adm.get('iters', 0), (adm.get('salt') or '')[:12]))
+    elif cfg.get('admin_password'):
+        print('  管理员  : 明文 admin_password（建议改用 set-pw + bundle 走校验块）')
+    else:
+        print('  管理员  : (无：端上不能解锁管理员模式)')
 
 
 if __name__ == '__main__':

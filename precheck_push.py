@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """推送前自检：确认待推送目录里**只有开源内容**，没有宿主 App 的代码/产物。
    检查项：①禁止的扩展名/目录 ②是否含原版包名路径 ③AGPL 头覆盖率 ④必要文件齐全
-          ⑤授权只上密文（license.json 无明文、无旧版 features.json）
-          ⑥不含私钥/主密钥/管理员密码，且端上密钥是占位值
+          ⑤授权=配置+签名（payload/sig），payload 里没有管理员密码明文，且仓库没有明文 features.json
+          ⑥不含私钥/管理员密码文件
 """
 import io, os, sys, re, json, base64
 
@@ -73,9 +73,8 @@ ok(len(spdx_py) == len(py_files), "全部脚本含 SPDX 头（%d/%d）" % (len(s
 print("④ 必要文件")
 need = ['LICENSE', 'README.md', 'NOTICE.md', '.gitignore', 'license.json',
         'mod-src/net/xuele/xuelets/mod/XLModFeatures.java',
-        'mod-src/net/xuele/xuelets/mod/XLModSecrets.java',
-        'mod-src/net/xuele/xuelets/mod/XLModBank.java',
         'mod-src/net/xuele/xuelets/mod/XLModCrypto.java',
+        'mod-src/net/xuele/xuelets/mod/XLModBank.java',
         'mod-src/net/xuele/xuelets/mod/Obf.java',
         'guard_gen.py', 'build_guard.py', 'obf_strings.py', 'inject_dexes.py',
         'obf-rules.pro', 'guard-rules.pro',
@@ -84,7 +83,7 @@ need = ['LICENSE', 'README.md', 'NOTICE.md', '.gitignore', 'license.json',
 for n in need:
     ok(os.path.exists(os.path.join(REPO, n)), "存在 %s" % n)
 
-print("⑤ 授权只上密文（V4.3p）")
+print("⑤ 授权与明文（V4.3p：明文配置只在你本地）")
 lic_path = os.path.join(REPO, 'license.json')
 if os.path.exists(lic_path):
     txt = io.open(lic_path, encoding='utf-8').read()
@@ -93,31 +92,34 @@ if os.path.exists(lic_path):
     except Exception as e:
         o = {}
         ok(False, "license.json 不是合法 JSON：%s" % e)
-    ok('enc' in o and 'salt' in o and 'sig' in o, "license.json 是加密格式（enc/salt/sig）")
-    ok('payload' not in o, "license.json 里没有旧版明文 payload")
-    for leak in ('"features"', '"notice"', 'identity', 'homework', 'admin_hash'):
-        ok(leak not in txt, "license.json 不含明文片段 %s" % leak)
+    ok('payload' in o and 'sig' in o, "license.json = 配置 + 签名（payload/sig）")
+    ok('enc' not in o, "license.json 里没有上一版的加密字段（已回到旧方案）")
     try:
-        blob = base64.b64decode(o.get('enc', ''))
-        ok(len(blob) > 32, "密文体量正常（%d 字节）" % len(blob))
-    except Exception:
-        ok(False, "enc 不是合法 base64")
+        payload = base64.b64decode(o.get('payload', '')).decode('utf-8')
+        ok(True, "payload 可解出（%d 字节）" % len(payload))
+        ok('admin_password' not in payload, "payload 里**没有管理员密码明文**（只有 PBKDF2 校验块）")
+        ok('"hash"' in payload and '"salt"' in payload, "payload 里带 admin 校验块（salt/hash）")
+    except Exception as e:
+        ok(False, "payload 解码失败：%s" % e)
 for legacy in ('features.json', 'features.json.sig', 'features.json.sha256'):
-    ok(not os.path.exists(os.path.join(REPO, legacy)), "仓库里没有明文 %s（license 明文不上仓库）" % legacy)
+    ok(not os.path.exists(os.path.join(REPO, legacy)), "仓库里没有明文 %s（明文配置不上仓库）" % legacy)
 
 print("⑥ 密钥/密码不泄露")
 priv = [f for f in files if f.endswith('.pem') and 'private' in f.lower()]
 ok(not priv, "仓库中没有私钥（命中: %s）" % (priv or '无'))
-ok(not os.path.exists(os.path.join(REPO, 'keys', 'license_key.txt')), "仓库中没有主密钥 keys/license_key.txt")
-ok(not os.path.exists(os.path.join(REPO, 'keys', 'admin_pw.txt')), "仓库中没有管理员密码 keys/admin_pw.txt")
 pub = [f for f in files if f.endswith('.pem') and 'public' in f.lower()]
 ok(bool(pub), "包含公钥文件（供校验用）: %s" % (pub or '无'))
-sec = os.path.join(REPO, 'mod-src/net/xuele/xuelets/mod/XLModSecrets.java')
-if os.path.exists(sec):
-    s = io.open(sec, encoding='utf-8').read()
-    m = re.search(r'LICENSE_KEY_HEX\s*=\s*\n?\s*"([0-9a-fA-F]{64})"', s)
-    ok(bool(m) and m.group(1).lower() == '0' * 0 + '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f',
-       "端上主密钥是仓库占位值（真实主密钥未被提交）")
+ok(not os.path.exists(os.path.join(REPO, 'keys', 'admin_pw.txt')), "仓库中没有管理员密码文件")
+sec_leaks = []
+for f in files:
+    if f.endswith(('.java', '.json', '.md', '.py', '.bat')) and 'license.json' not in f:
+        try:
+            s = io.open(f, encoding='utf-8').read()
+        except Exception:
+            continue
+        if 'admin_password' in s and f.endswith('.json'):
+            sec_leaks.append(f)
+ok(not sec_leaks, "除本地配置外，仓库里没有 admin_password 明文（命中: %s）" % (sec_leaks or '无'))
 
 APP = re.compile(r'(net\.xuele\.(android|im)\.|SingleFileTask|FileUploadManager|AssignHomeworkActivity|AssignWorkHelper|LoginManager|VideoUtils|VideoFormatHelper)')
 bad_docs = []
@@ -133,5 +135,5 @@ if problems:
     for p in problems:
         print("  -", p)
     sys.exit(1)
-print("推送前自检通过：目录中只有 XLMod 自有代码与文档（AGPL-3.0），授权只上密文")
+print("推送前自检通过：目录中只有 XLMod 自有代码与文档（AGPL-3.0），明文配置/密码/私钥都不在仓库里")
 

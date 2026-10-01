@@ -236,7 +236,10 @@ public class XLModActivity extends Activity {
             });
         }
         addCard(content, cardAdmin);
-        tip(content, "管理员密码**不在代码里**：它和功能开关一起被 AES-256-CBC 加密进仓库的 license.json（公开仓库里只有密文）。输入正确 → 本机放行全部功能，优先级高于云端开关/熔断/有效期；校验块在第一次成功校验授权后缓存到本机，之后断网也能解锁。");
+        tip(content, "管理员密码就是配置里的一个字段：作者本地 features.json 写 admin_password，"
+                + "签发时脚本换算成 PBKDF2 校验块再签名打包，因此**仓库里的 license.json 没有密码明文**。\n"
+                + "输入正确 → 本机放行全部功能（优先级高于云端开关/熔断/有效期）；解锁标记保存在本机，重启仍有效。\n"
+                + "校验块只在内存（授权本来就不落盘）：重启后若要再次解锁，先联网校验一次授权即可。");
 
         // ===== 教师身份 =====
         boolean gIdentity = addGroupHeaderGated(content, "教师身份", "identity");
@@ -940,11 +943,9 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
             } else {
                 sb.append("管理员模式：未解锁（按授权开关）");
             }
-            sb.append("\n密码校验块：")
-                    .append(XLModFeatures.adminVerifierReady() ? "已就绪（随授权加密下发）" : "未获取（先校验授权）")
-                    .append(" · 授权形态：")
-                    .append(XLModFeatures.licenseFormat() == 2 ? "加密（仓库只有密文）"
-                            : (XLModFeatures.licenseFormat() == 1 ? "明文签名" : "未取到"));
+            sb.append("\n管理员密码：")
+                    .append(XLModFeatures.adminVerifierReady() ? "授权里已带（签名下发，仓库无明文）" : "未获取（先校验授权）")
+                    .append(" · 授权文件：license.json（明文 features.json 不上仓库）");
             return sb.toString();
         } catch (Throwable t) {
             return "管理员状态读取失败: " + t;

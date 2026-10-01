@@ -36,13 +36,16 @@ import java.security.spec.X509EncodedKeySpec;
  *   <li><b>熔断</b>：{@code "kill": true} 全停；<b>有效期</b>：{@code "expires"}（epoch 秒，0/缺省=不过期）。</li>
  * </ul>
  *
- * <p>仓库根目录需放 <code>license.json</code>（V4.3p 起只有密文；<b>不再放明文 features.json</b>）。
- * 签发：<code>python license_tool.py seal</code>（AES-256-CBC 加密 + ECDSA 签名；私钥 <code>keys/…_private.pem</code>，不提交）。</p>
+ * <p>仓库根目录放 <code>license.json</code>（配置 + 签名打包的**单文件**），
+ * <b>明文的 features.json 不再上传到仓库</b>（只留在作者本地，改配置用它）。
+ * 签发：<code>python publish_license.py</code>（或 <code>sign_config.py sign/bundle</code>；
+ * 私钥 <code>keys/…_private.pem</code>，不提交）。</p>
  *
- * <p><b>V4.3p 加密授权</b>：{@code {"v":2,"salt":"…","enc":"…","sig":"…"}}，
- * {@code enc}=AES-256-CBC(salt‖iv‖密文)，密钥由本地主密钥派生（{@link XLModSecrets}，公开仓库里是占位密钥 →
- * 别人拿到密文也解不开）；明文里除功能开关外还有<b>管理员密码校验块</b>（PBKDF2 盐/迭代数/哈希），
- * 面板输入正确密码即"管理员解锁"（全部功能放行，优先级高于 features/kill/过期）。</p>
+ * <p><b>管理员密码（V4.3p）</b>：就是配置里的一个字段 —— 作者本地 <code>features.json</code> 里写
+ * <code>"admin_password": "你的密码"</code>，<b>签发时脚本把它换算成 PBKDF2 校验块</b>
+ * （<code>"admin": {"salt","iters","hash"}</code>）再签名打包，因此上传到仓库的 license.json 里
+ * <b>没有密码明文</b>；面板输入密码即"管理员解锁"（全部功能放行，优先级最高）。
+ * 校验块只在内存里（授权本来就不落盘），断网重启后需重新校验一次授权才能再次解锁。</p>
  */
 public final class XLModFeatures {
 
@@ -57,9 +60,6 @@ public final class XLModFeatures {
 
     /** 拉不到/验签不过时仍可用的"隐藏类功能"（其余全部锁死） */
     public static final String[] FAIL_CLOSED_ALLOW = {"privacy", "logs"};
-
-    /** 加密授权的签名前缀（签名覆盖 前缀+salt+enc，避免换 salt 重放） */
-    private static final String SIG_PREFIX = "XLModLic-v2|";
     // 注：privacy 同时属于 ALWAYS_ON —— 即"配置拿不到"和"配置明确关掉它"都不影响隐私功能
 
     /** 全部功能区 ID（与面板分组一一对应） */
@@ -86,7 +86,6 @@ public final class XLModFeatures {
     private static long sExpires = 0L;
     private static String sErr = "";
     private static boolean sFetching = false;
-    private static int sLicenseFormat = 0;      // 0=未取到 1=明文(payload) 2=加密(enc)
     private static Listener sListener = null;
     private static Handler sHandler = null;
     private static boolean sWatching = false;
@@ -118,11 +117,6 @@ public final class XLModFeatures {
     public static boolean killed() {
         JSONObject c = sCfg;
         return c != null && c.optBoolean("kill", false);
-    }
-
-    /** 授权形态：0=未取到 1=明文签名 2=加密签名（V4.3p） */
-    public static int licenseFormat() {
-        return sLicenseFormat;
     }
 
     /** 公告内容（每次打开面板都显示） */
@@ -184,16 +178,14 @@ public final class XLModFeatures {
         }
         long sec = (System.currentTimeMillis() - sLoadedAt) / 1000L;
         String exp = sExpires > 0 ? (" · 有效期至 " + sExpires + "（epoch 秒）") : " · 长期有效";
-        String fmt = sLicenseFormat == 2 ? "加密授权（AES-256-CBC + ECDSA P-256，仓库里只有密文）"
-                : "明文授权（payload + ECDSA P-256，建议改用加密授权）";
         return admin + "授权状态：" + (c.optBoolean("kill", false) ? "已熔断（全部停用）"
                 : (expired() ? "已过期（锁定）" : "正常"))
                 + " · 已开启 " + on + " 项 · " + sec + " 秒前校验通过" + exp
-                + "\n" + fmt
-                + (XLModConfig.hasAdminVerifier() ? " · 管理员密码校验块已就绪" : " · 授权里没有管理员密码块");
+                + "\n已验签（ECDSA P-256，作者私钥签发；明文配置不上仓库，仓库里只有签名后的 license.json）"
+                + (adminVerifierReady() ? " · 管理员密码校验块已就绪" : " · 授权里没有管理员密码字段");
     }
 
-    /** 拉取 + 验签（+ 解密）（后台线程）；force=false 时 60 秒内不重复请求 */
+    /** 拉取 + 验签（后台线程）；force=false 时 60 秒内不重复请求 */
     public static void refreshAsync(final Context ctx, final boolean force) {
         if (sFetching) return;
         if (!force && System.currentTimeMillis() - sLastTryAt < REFRESH_MS) return;
@@ -203,87 +195,46 @@ public final class XLModFeatures {
             @Override
             public void run() {
                 try {
-                    // 优先用"单文件" license.json（配置+签名在同一文件里）：
+                    // 单文件 license.json（配置 + 签名在同一文件里）：
                     // 两个文件各自走 CDN 缓存时会出现"新签名配旧配置"的不同步，导致误锁；
-                    // 单文件只有一份缓存，从根上避免该问题。
-                    // V4.3p：单文件里是**密文**（enc）；旧版明文（payload）仍兼容；
-                    // 再不行才回退到 features.json + features.json.sig（仓库已不再放，留作兼容）。
+                    // 单文件只有一份缓存，从根上避免该问题。取不到时回退到 features.json + .sig。
                     byte[] cfg = null;
-                    int format = 0;
+                    byte[] sig = null;
                     byte[] bundle = httpGet(bundleUrl());
                     if (bundle != null) {
                         JSONObject b = new JSONObject(new String(bundle, "UTF-8").trim());
-                        String enc = b.optString("enc", "");
-                        if (!enc.isEmpty() && b.has("salt")) {
-                            String salt = b.optString("salt", "");
-                            byte[] sig = android.util.Base64.decode(b.getString("sig"),
-                                    android.util.Base64.DEFAULT);
-                            // 签名覆盖 前缀+salt+enc（换 salt/换密文都会验签失败）
-                            byte[] signed = (SIG_PREFIX + salt + "|" + enc).getBytes("UTF-8");
-                            if (!verify(signed, sig)) {
-                                sErr = "加密授权签名校验失败";
-                                XLModConfig.logAppend("[功能开关] " + sErr + "（保持锁定）");
-                                return;
-                            }
-                            cfg = decryptLicense(salt, enc);
-                            if (cfg == null) {
-                                sErr = "加密授权解密失败（主密钥不匹配）";
-                                XLModConfig.logAppend("[功能开关] " + sErr + "（保持锁定）");
-                                return;
-                            }
-                            format = 2;
-                        } else if (b.has("payload")) {
-                            cfg = android.util.Base64.decode(b.getString("payload"),
-                                    android.util.Base64.DEFAULT);
-                            byte[] sig = android.util.Base64.decode(b.getString("sig"),
-                                    android.util.Base64.DEFAULT);
-                            if (!verify(cfg, sig)) {
-                                sErr = "签名校验失败";
-                                XLModConfig.logAppend("[功能开关] 配置签名校验失败（保持锁定）");
-                                return;
-                            }
-                            format = 1;
-                        }
-                    }
-                    if (cfg == null) {
+                        cfg = android.util.Base64.decode(b.getString("payload"), android.util.Base64.DEFAULT);
+                        sig = android.util.Base64.decode(b.getString("sig"), android.util.Base64.DEFAULT);
+                    } else {
                         byte[] c = httpGet(url());
                         byte[] sigB64 = httpGet(url() + ".sig");
                         if (c != null && sigB64 != null) {
-                            byte[] sig = android.util.Base64.decode(new String(sigB64, "UTF-8").trim(),
-                                    android.util.Base64.DEFAULT);
-                            if (!verify(c, sig)) {
-                                sErr = "签名校验失败（回退 features.json）";
-                                XLModConfig.logAppend("[功能开关] " + sErr + "（保持锁定）");
-                                return;
-                            }
                             cfg = c;
-                            format = 1;
+                            sig = android.util.Base64.decode(new String(sigB64, "UTF-8").trim(),
+                                    android.util.Base64.DEFAULT);
                         }
                     }
-                    if (cfg == null) {
-                        sErr = "授权或签名下载失败";
+                    if (cfg == null || sig == null) {
+                        sErr = "配置或签名下载失败";
                         XLModConfig.logAppend("[功能开关] " + sErr + "（保持锁定）");
+                        return;
+                    }
+                    if (!verify(cfg, sig)) {
+                        sErr = "签名校验失败";
+                        XLModConfig.logAppend("[功能开关] 配置签名校验失败（保持锁定）");
                         return;
                     }
                     String json = new String(cfg, "UTF-8").trim();
                     JSONObject o = new JSONObject(json);
-                    boolean changed = !json.equals(sRaw) || format != sLicenseFormat;
+                    boolean changed = !json.equals(sRaw);
                     sCfg = o;
                     sRaw = json;
-                    sLicenseFormat = format;
                     sExpires = o.optLong("expires", 0L);
                     sErr = expired() ? "配置已过期" : "";
                     if (changed) sLoadedAt = System.currentTimeMillis();
-                    // 管理员密码校验块（随授权一起加密下发）→ 本地缓存，断网也能验证管理员密码
-                    try {
-                        JSONObject adm = o.optJSONObject("admin");
-                        if (adm != null && adm.optString("hash", "").length() > 0) {
-                            XLModConfig.setAdminVerifier(adm.optString("salt", ""),
-                                    adm.optInt("iters", 20000), adm.optString("hash", ""));
-                        }
-                    } catch (Throwable ignored) {
-                    }
-                    XLModConfig.logAppend("[功能开关] 授权校验通过" + (changed ? "（有变化）" : "（无变化）")
+                    // 管理员密码：随配置一起签名下发（脚本已把 admin_password 换成 PBKDF2 校验块）
+                    loadAdminVerifier(o);
+                    XLModConfig.logAppend("[功能开关] 配置验签通过" + (changed ? "（有变化）" : "（无变化）")
                             + "：" + statusText().replace('\n', ' '));
                     if (changed) notifyChanged();
                 } catch (Throwable t) {
@@ -296,55 +247,59 @@ public final class XLModFeatures {
         }).start();
     }
 
-    // ================= 加密授权（V4.3p） =================
+    // ================= 管理员密码（V4.3p：配置里的一个字段） =================
+    // 只放内存（与"授权不落盘"一致）：拿到配置就能校验，重启后重新拉一次配置即可再次解锁。
+    private static String sAdminSalt = "";
+    private static String sAdminHash = "";
+    private static int sAdminIters = 20000;
+    private static String sAdminPlain = "";
 
-    /**
-     * 解密 license 的 enc 段：base64(salt 单独在 JSON 里, enc = iv‖密文)。
-     * 密钥 = HMAC-SHA256(本地主密钥, salt+标签)（见 {@link XLModCrypto#licenseKey(byte[])}）。
-     */
-    private static byte[] decryptLicense(String saltB64, String encB64) {
+    private static void loadAdminVerifier(JSONObject o) {
         try {
-            byte[] salt = android.util.Base64.decode(saltB64, android.util.Base64.DEFAULT);
-            byte[] blob = android.util.Base64.decode(encB64, android.util.Base64.DEFAULT);
-            if (salt.length < 8 || blob.length <= 16) return null;
-            byte[] iv = new byte[16];
-            byte[] ct = new byte[blob.length - 16];
-            System.arraycopy(blob, 0, iv, 0, 16);
-            System.arraycopy(blob, 16, ct, 0, ct.length);
-            byte[] key = XLModCrypto.licenseKey(salt);
-            if (key.length == 0) return null;
-            return XLModCrypto.aesCbcDecrypt(key, iv, ct);
-        } catch (Throwable t) {
-            XLModConfig.logAppend("[功能开关] 授权解密异常: " + t);
-            return null;
+            sAdminSalt = "";
+            sAdminHash = "";
+            sAdminPlain = "";
+            sAdminIters = 20000;
+            if (o == null) return;
+            JSONObject adm = o.optJSONObject("admin");
+            if (adm != null) {
+                sAdminSalt = adm.optString("salt", "");
+                sAdminHash = adm.optString("hash", "");
+                sAdminIters = adm.optInt("iters", 20000);
+            }
+            // 兼容：配置里直接写了明文密码（面板按明文比对）
+            String plain = o.optString("admin_password", "");
+            if (plain != null && !plain.trim().isEmpty()) sAdminPlain = plain.trim();
+        } catch (Throwable ignored) {
         }
     }
 
-    // ================= 管理员密码 =================
-
-    /** 授权里是否带有管理员密码校验块（没拿到授权时无法验证管理员密码） */
+    /** 授权里是否带有管理员密码（哈希块或明文都可以） */
     public static boolean adminVerifierReady() {
-        return XLModConfig.hasAdminVerifier();
+        return !sAdminPlain.isEmpty() || (!sAdminSalt.isEmpty() && !sAdminHash.isEmpty());
     }
 
     /**
-     * 校验管理员密码：对（授权里加密下发的）PBKDF2 校验块做比对。
+     * 校验管理员密码（对着授权里的字段比对；只读内存，不写盘）。
      *
      * @return 空字符串 = 通过；否则为失败原因（直接显示给用户）
      */
     public static String verifyAdminPassword(String pw) {
         try {
             if (pw == null || pw.trim().isEmpty()) return "请输入管理员密码";
-            String saltB64 = XLModConfig.getAdminSalt();
-            String hashB64 = XLModConfig.getAdminHash();
-            int iters = XLModConfig.getAdminIters();
-            if (saltB64.isEmpty() || hashB64.isEmpty()) {
-                return "本机还没有拿到带管理员密码块的授权：请先联网点「立即校验授权（拉取签名配置）」，再输入密码";
+            String in = pw.trim();
+            if (!adminVerifierReady()) {
+                return "本机还没有拿到带管理员密码的授权：请先联网点「立即校验授权（拉取签名配置）」，再输入密码";
             }
-            byte[] salt = android.util.Base64.decode(saltB64, android.util.Base64.DEFAULT);
-            byte[] want = android.util.Base64.decode(hashB64, android.util.Base64.DEFAULT);
-            byte[] got = XLModCrypto.pbkdf2(pw.trim().getBytes("UTF-8"), salt, iters, want.length);
-            if (got.length == 0 || !XLModCrypto.sameBytes(want, got)) {
+            if (!sAdminHash.isEmpty()) {
+                byte[] salt = android.util.Base64.decode(sAdminSalt, android.util.Base64.DEFAULT);
+                byte[] want = android.util.Base64.decode(sAdminHash, android.util.Base64.DEFAULT);
+                byte[] got = XLModCrypto.pbkdf2(in.getBytes("UTF-8"), salt, sAdminIters, want.length);
+                if (got.length == 0 || !XLModCrypto.sameBytes(want, got)) {
+                    XLModConfig.logAppend("[管理员] 管理员密码校验失败（输入不匹配）");
+                    return "管理员密码不正确";
+                }
+            } else if (!in.equals(sAdminPlain)) {
                 XLModConfig.logAppend("[管理员] 管理员密码校验失败（输入不匹配）");
                 return "管理员密码不正确";
             }

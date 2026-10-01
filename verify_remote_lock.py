@@ -38,9 +38,10 @@ ok('notice()' in SRC and 'onConfigChanged' in SRC, "公告 + 变更回调存在"
 ok('showNoticeIfAny' in ACT and 'rebuildUi' in ACT, "面板：每次打开弹公告 + 变更实时重建")
 ok('XLModFeatures.startWatcher();' in HLP and 'XLModFeatures.refreshAsync(act, true);' in HLP,
    "启动时即拉一次配置 + 启动轮询")
-ok('optString("enc", "")' in SRC and 'SIG_PREFIX' in SRC and 'decryptLicense' in SRC,
-   "V4.3p：加密授权（enc/salt + 签名前缀）解析与解密")
-ok('b.has("payload")' in SRC, "V4.3p：旧版明文（payload）兼容分支仍在")
+ok('b.getString("payload")' in SRC and 'decryptLicense' not in SRC and 'SIG_PREFIX' not in SRC,
+   "V4.3p：授权 = 配置+签名 单文件（payload/sig），没有加密/主密钥逻辑")
+ok('loadAdminVerifier' in SRC and 'admin_password' in SRC,
+   "V4.3p：管理员密码来自配置字段（admin 校验块 / admin_password 两种都读）")
 
 print("B. 行为断言（复刻 enabled() 判定）")
 ALLOW = {"privacy", "logs"}
@@ -95,13 +96,9 @@ for _p in ('xlmod-config/features.json', 'features.json', 'tmp-repo/features.jso
 if sample is None and os.path.exists('license.json'):
     try:
         import sign_config as sc
-        _m = sc.load_master(required=False)
-        if _m:
-            o = json.load(io.open('license.json', encoding='utf-8'))
-            blob = sc._b64d(o['enc'])
-            sample = json.loads(sc._openssl_dec(sc.derive_key(_m, sc._b64d(o['salt'])),
-                                                blob[:16], blob[16:]).decode('utf-8'))
-            print("      （样例取自解密后的 license.json）")
+        payload, _ = sc.payload_of('license.json')
+        sample = json.loads(payload.decode('utf-8'))
+        print("      （样例取自 license.json 的 payload）")
     except Exception as e:
         print("      （无法取得样例：%s）" % e)
 if sample is None:

@@ -30,54 +30,51 @@
 
 ## 2. 远程授权与公告（重要）
 
-功能**由仓库根目录的加密授权控制**（V4.3p 起仓库里只有密文）：
+功能**由仓库根目录的 `license.json` 控制**（配置 + 签名打包成单文件）：
 
 ```
-license.json       单文件加密授权：{"v":2,"salt":…,"enc":…,"sig":…}
-                   enc = AES-256-CBC(salt‖iv‖明文)；明文 = 功能开关 + 公告 + 有效期 + 管理员密码校验块
+license.json   {"payload": base64(明文配置), "sig": base64(ECDSA P-256 签名)}
+明文配置        features.json —— **只在作者本地，不上传仓库**（改配置就用记事本改它）
 ```
 
-App 只读这一个文件（V4.2 及以前的明文 `features.json` + `.sig` 仍兼容，但仓库不再放明文）。
-
-* **端上只内置公钥**（验签）与**本地主密钥派生**（解密）；验签不过 / 下载失败 / 解不开 / 已过期 → **锁死**
-  （除 `privacy`、`logs` 外全部禁用，不读本地缓存）；
+* **端上只内置公钥**：验签不过 / 下载失败 / 已过期 → **锁死**（除 `privacy`、`logs` 外全部禁用，不读本地缓存）；
 * **地址写死在代码里**（`XLModFeatures.DEFAULT_URL`），面板不提供修改入口 → 用户无法自建配置自解锁；
-* 解密后按 `features` 逐项开关，未列出的按 `default`（缺省 `false`）；`"kill": true` 全停；
+* 拉到配置 → 按 `features` 逐项开关，未列出的按 `default`（缺省 `false`）；`"kill": true` 全停；
 * `notice` = **公告**，每次打开 Mod 面板弹出；`expires` = 有效期（epoch 秒，`0`/缺省表示不过期）；
 * App 在前台**每 60 秒**校验一次，配置有变化**立即生效**。
 
 ### 2.1 管理员密码（V4.3p）
 
-* 管理员密码**不在代码里**：签发时只把它的 **PBKDF2-HMAC-SHA256 校验块**（盐/迭代数/哈希）写进授权明文，
-  再随整份授权一起 AES 加密 —— 所以仓库里既看不到功能开关，也看不到密码；
+* 管理员密码就是**明文配置里的一个字段**：本地 `features.json` 写 `"admin_password": "你的密码"`；
+* 签发（`bundle`）时脚本把它换算成 `"admin": {"alg":"PBKDF2-HMAC-SHA256","iters":20000,"salt":…,"hash":…}`
+  再签名打包 —— 所以**上传到仓库的 license.json 里没有密码明文**；
 * 面板「管理员解锁」输入密码 → 校验通过即在本机放行**全部功能**（优先级高于 features / kill / 有效期），
   可随时「退出管理员模式」回到按授权开关；
-* 校验块在第一次成功校验授权后缓存到本机 → 之后断网也能解锁；
-* 公开仓库里放的是**占位主密钥**（`mod-src/.../XLModSecrets.java`），因此**拿到 license.json 也解不开**。
+* 端上只在**内存**里保存校验块（授权本来就不落盘）：重启后若要再次解锁，先联网校验一次授权即可。
 
 ### 2.2 签发与发布（作者本地）
 
 ```bash
-python sign_config.py init-key            # ① 生成主密钥（写 keys/license_key.txt + 端上常量）
-python sign_config.py set-pw 你的密码      # ② 设置管理员密码（写 keys/admin_pw.txt，不提交）
-python sign_config.py seal features.json  # ③ 加密+签名 → license.json（仓库只提交它）
-python sign_config.py check  license.json # ④ 验签 + 解密 + 打印摘要
-python sign_config.py verify-pw 你的密码   # ⑤ 像端上一样校验管理员密码
+python sign_config.py set-pw 你的密码        # ① 把密码写进本地 features.json（也可直接用记事本改）
+python sign_config.py bundle features.json  # ② 签发：配置 + 管理员校验块 + 签名 → license.json
+python sign_config.py check  license.json   # ③ 验签 + 打印摘要
+python sign_config.py verify-pw 你的密码     # ④ 像端上一样校验管理员密码
+python publish_license.py                   # ⑤ 一键：签发 → 删仓库里的明文 → 提交推送 → 远程复验
 ```
 
 `features.json`（明文配置）只留在作者本地/工作区，`.gitignore` 已排除；仓库里只有 `license.json`。
 
 ### 2.3 Windows 一键更新（推荐）
 
-仓库根目录 `update_license.bat`（双击即可，V2.0 起走加密授权）：
+仓库根目录 `update_license.bat`（双击即可，V2.1）：
 
 ```
-update_license.bat              加密 → 签名 → 自检 → 删除仓库明文 → 提交推送 → 远程复验
-update_license.bat edit         先编辑 features.json，再走上面的流程
-update_license.bat nopush       只做本地加密/校验
+update_license.bat              签发 → 自检 → 删除仓库明文 → 提交推送 → 远程复验
+update_license.bat edit         先编辑 features.json（明文），再走上面的流程
+update_license.bat nopush       只做本地签发/校验
 ```
 
-配套小工具：`sign_config.py`（init-key / set-pw / seal / check / open / verify-pw + 旧版 sign/verify/bundle）、
+配套小工具：`sign_config.py`（sign / verify / bundle / check / set-pw / verify-pw / show-pw）、
 `publish_license.py`（一键发布）、`show_license.py`（打印授权摘要）、`compare_license.py`（本地 vs 远端一致性）。
 
 ## 3. 开始开发前请先读
