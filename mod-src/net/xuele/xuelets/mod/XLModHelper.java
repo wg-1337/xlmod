@@ -4578,25 +4578,18 @@ public class XLModHelper {
                                 if (list == null) return;
                                 int withAnswer = 0;
                                 int listenGot = 0;
+                                int fillGot = 0;
                                 for (int qi = 0; qi < list.size(); qi++) {
                                     M_ChallengeQuestion q = list.get(qi);
                                     if (q == null || q.questionId == null || q.questionId.isEmpty()) continue;
                                     sDetailMap.put(q.questionId, q);
-                                    // V4.4q/V4.6p：听力(52)标准答案在详情答案映射的 **listenServerDesc**
-                                    //（其次 sContent）—— 不是 answerContentList（那里可能是学生自己的作答）
+                                    // V5.0p（内修订）：听力(52)标准答案 = 题目 DTO 的 desc（映射里叫 listenServerDesc）
                                     if (parseQType(q) == QT_LISTEN && map != null) {
                                         try {
                                             net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(qi);
-                                            String txt = "";
-                                            if (u != null) {
-                                                if (u.listenServerDesc != null) txt = u.listenServerDesc;
-                                                if (XLModBank.isJunk(txt) && u.sContent != null) txt = u.sContent;
-                                                if (XLModBank.isJunk(txt) && u.answerContentList != null
-                                                        && !u.answerContentList.isEmpty()
-                                                        && u.answerContentList.get(0) != null) {
-                                                    txt = String.valueOf(u.answerContentList.get(0));
-                                                }
-                                            }
+                                            // V5.0p（内修订）：听力只认权威字段 listenServerDesc（= 题目 DTO 的 desc）；
+                                            // 不再回退 sContent / answerContentList —— 那些是**学生作答**（自动打时就是我们盲填的）
+                                            String txt = (u == null || u.listenServerDesc == null) ? "" : u.listenServerDesc;
                                             if (!XLModBank.isJunk(txt)) {
                                                 sDetailListenText.put(q.questionId, txt.trim());
                                                 XLModConfig.kbPut(q.questionId, "L|" + txt.trim());
@@ -4606,34 +4599,14 @@ public class XLModHelper {
                                         } catch (Throwable ignored) {
                                         }
                                     }
-                                    // V4.6p：填空(3)标准答案 = 详情答案映射的 answerContentList（每空的 sContent）
-                                    if (parseQType(q) == QT_FILL && map != null) {
-                                        try {
-                                            net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(qi);
-                                            if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
-                                                XLModBank.putFillFromDetail(q.questionId,
-                                                        new java.util.ArrayList<String>(u.answerContentList),
-                                                        new java.util.ArrayList<String>(u.answerIdList));   // V5.0p：连空位ID一起存
-                                                // V5.0p：写成 "F|空位ID=答案\u0001..."，作答时按空位ID对位（不再靠位次）
-                                                StringBuilder fb = new StringBuilder("F|");
-                                                boolean any = false;
-                                                int bn = 0;
-                                                for (int bi = 0; bi < u.answerContentList.size(); bi++) {
-                                                    String s = u.answerContentList.get(bi);
-                                                    if (XLModBank.isJunk(s)) continue;
-                                                    String bid = (u.answerIdList != null && bi < u.answerIdList.size()
-                                                            && u.answerIdList.get(bi) != null)
-                                                            ? u.answerIdList.get(bi).trim() : "";
-                                                    if (bn > 0) fb.append("\u0001");
-                                                    if (!bid.isEmpty()) fb.append(bid).append('=');
-                                                    fb.append(s.trim());
-                                                    any = true;
-                                                    bn++;
-                                                }
-                                                if (any) XLModConfig.kbPut(q.questionId, fb.toString());
-                                            }
-                                        } catch (Throwable ignored) {
-                                        }
+                                    // ===== V5.0p（内修订）：填空(3) —— **标准答案是 answers[].answerContent** =====
+                                    // 依据宿主自己的"答题详情"页：QuestionAnswerViewV2.showFillResult(...)
+                                    //   → QuestionUtils.bindFillTextServerAnswer(mTvServerAnswer, getTrueAnswerList(mServerAnswerList))
+                                    //   → getTrueAnswerList() { for (a : list) out.add(a.answerContent); }
+                                    // 而 map.get(i).answerContentList 装的是 **sContent = 学生作答内容**（s=student），
+                                    // 以前拿它当标准答案 → 等于把"学生的答案（自动打时就是我们盲填的）"当正确解 → 填空必然全错。
+                                    if (parseQType(q) == QT_FILL) {
+                                        if (harvestFillAuthoritative(q)) fillGot++;
                                     }
                                     // V4.3p/V4.4p：详情数据整题入库（含正确答案文本/填空文本）
                                     try {
@@ -4642,27 +4615,8 @@ public class XLModHelper {
                                     }
                                     java.util.List<AnswersBean> ans = q.answers;
                                     if (ans == null) continue;
-                                    if (parseQType(q) == QT_FILL) {
-                                        // 填空：逐空文本（详情接口若带 answerContent 才有效）
-                                        boolean any = false;
-                                        for (AnswersBean a : ans) {
-                                            if (a.answerContent != null && !a.answerContent.isEmpty()) {
-                                                any = true;
-                                                break;
-                                            }
-                                        }
-                                        if (!any) continue;
-                                        // V5.0p：带空位ID写入（作答时按 ID 对位，避免顺序变化导致整题错位）
-                                        StringBuilder sb = new StringBuilder("F|");
-                                        for (int i = 0; i < ans.size(); i++) {
-                                            AnswersBean a = ans.get(i);
-                                            String bid = (a.answerId == null) ? "" : a.answerId.trim();
-                                            if (i > 0) sb.append("\u0001");
-                                            if (!bid.isEmpty()) sb.append(bid).append('=');
-                                            sb.append(a.answerContent == null ? "" : a.answerContent);
-                                        }
-                                        XLModConfig.kbPut(q.questionId, sb.toString());
-                                    } else {
+                                    if (parseQType(q) != QT_FILL) {
+                                        // 选择/判断：kb 记"正确选项ID"（与宿主 showSelectResult 的口径一致：isCorrect==1）
                                         StringBuilder ids = new StringBuilder("S|");
                                         int n = 0;
                                         for (AnswersBean a : ans) {
@@ -4677,19 +4631,21 @@ public class XLModHelper {
                                         }
                                     }
                                 }
+                                int total = (list == null) ? 0 : list.size();
                                 int now = XLModBank.size();
-                                trace("[题库] 挑战详情采集完成（" + fReason + "，第 " + attempt + " 次）：详情 "
-                                        + (list == null ? 0 : list.size()) + " 题，其中带答案 " + withAnswer
-                                        + " 题，听力文本 " + listenGot + " 条；题库 " + before + " → " + now + " 题");
+                                trace("[题库] 答题详情采集完成（" + fReason + "，第 " + attempt + " 次）：共 " + total
+                                        + " 题 → 权威答案入库 " + withAnswer + " 题（听力文本 " + listenGot
+                                        + " 条、填空 " + fillGot + " 题）；题库 " + before + " → " + now + " 题");
                                 XLModBank.save(true);
-                                // V5.0p：这轮没拿到答案 → 过一会儿再试（结算刚落地时详情常常还是空的）
-                                if (withAnswer == 0 && attempt < 5 && list != null && !list.isEmpty()) {
+                                // V5.0p：只要还有题目没拿到权威答案就重试（结算刚落地时详情常常还不全）
+                                if (withAnswer < total && attempt < 5 && total > 0) {
                                     final long[] waits = {0, 1500, 3000, 6000, 10000, 10000};
                                     long wait = waits[Math.min(attempt, waits.length - 1)];
                                     final String fCh = challengeId;
                                     final String fMs = monthSubject;
                                     final String fR = fReason;
-                                    trace("[题库] 详情还没带答案 → " + (wait / 1000) + " 秒后重试（第 " + (attempt + 1) + " 次）");
+                                    trace("[题库] 还有 " + (total - withAnswer) + " 题没拿到权威答案 → "
+                                            + (wait / 1000) + " 秒后重试（第 " + (attempt + 1) + " 次）");
                                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
                                         @Override
                                         public void run() {
@@ -4707,8 +4663,54 @@ public class XLModHelper {
         }
     }
 
-    private static String shortId(String s) {
-        if (s == null) return "";
+    /**
+     * V5.0p（内修订）：**填空权威答案入库** —— 只认 {@code answers[].answerContent}。
+     *
+     * <p>依据：宿主"答题详情"页显示标准答案走的就是
+     * {@code QuestionAnswerViewV2.showFillResult(...)} → {@code getTrueAnswerList(mServerAnswerList)}
+     * → 逐个取 {@code answersBean.answerContent}；空位键是 {@code answersBean.answerId}。
+     * 而 {@code sContent} / 答案映射里的 {@code answerContentList} 是**学生作答内容**，不能用。</p>
+     *
+     * @return true = 至少一个空位有权威答案并已入库
+     */
+    private static boolean harvestFillAuthoritative(M_ChallengeQuestion q) {
+        try {
+            if (q == null || q.questionId == null || q.questionId.isEmpty()) return false;
+            java.util.List<AnswersBean> ans = q.answers;
+            if (ans == null || ans.isEmpty()) return false;
+            java.util.ArrayList<String> std = new java.util.ArrayList<String>();
+            java.util.ArrayList<String> ids = new java.util.ArrayList<String>();
+            boolean any = false;
+            for (AnswersBean a : ans) {
+                String t = (a == null) ? "" : a.answerContent;
+                ids.add((a == null || a.answerId == null) ? "" : a.answerId);
+                std.add(t == null ? "" : t);
+                if (t != null && !t.trim().isEmpty()) any = true;
+            }
+            if (!any) return false;
+            XLModBank.putFillFromDetail(q.questionId, std, ids);
+            // kb 也按权威口径写（"F|空位ID=标准答案\u0001..."）
+            StringBuilder fb = new StringBuilder("F|");
+            int bn = 0;
+            for (int i = 0; i < std.size(); i++) {
+                String t = std.get(i);
+                if (t == null || t.trim().isEmpty()) continue;
+                String bid = (i < ids.size() && ids.get(i) != null) ? ids.get(i).trim() : "";
+                if (bn > 0) fb.append("\u0001");
+                if (!bid.isEmpty()) fb.append(bid).append('=');
+                fb.append(t.trim());
+                bn++;
+            }
+            if (bn > 0) XLModConfig.kbPut(q.questionId, fb.toString());
+            trace("[题库] 填空权威答案入库: " + q.questionId + " → " + bn + " 个空（"
+                    + joinList(std) + "）");
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String shortId(String s) {        if (s == null) return "";
         return s.length() > 14 ? s.substring(0, 14) + "…" : s;
     }
 
@@ -5552,17 +5554,9 @@ public class XLModHelper {
             if (ph.isChallengeClassmate) {
                 XLModBank.harvestBattle(ph, sid);
             }
-            // V5.0p：普通挑战（以及任何一局）的题目也先收录进题库（题干+选项），
-            // 答案等结算时从「挑战详情」补（put() 会合并到同一条目，不会覆盖已有答案）
-            try {
-                java.util.ArrayList<M_ChallengeQuestion> ql = ph.mQuestionList;
-                if (ql != null && pos >= 0 && pos < ql.size()) {
-                    if (XLModBank.noteQuestion(ql.get(pos), ph.isChallengeClassmate ? "classmate" : "normal")) {
-                        sAutoNoteCount++;
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
+            // V5.0p（内修订）：**不再"先收题目、后补答案"** ——
+            // 题库只由"结算时的答题详情（queryCompetitionDetail）"统一写入权威题目+答案，
+            // 避免没有答案的骨架条目在后续对位时产生误判。
         } catch (Throwable t) {
         }
         // ===== 自动作答/悬浮窗共用：听力题上下文登记 + 详情拉取 + 定时反复回填（V4.7p 加固）=====
@@ -5882,19 +5876,10 @@ public class XLModHelper {
                                     M_ChallengeQuestion q = list.get(i);
                                     if (q == null || q.questionId == null) continue;
                                     sDetailMap.put(q.questionId, q);
-                                    // V4.6p：听力(52)标准答案是详情答案映射的 listenServerDesc（其次 sContent）
+                                    // V5.0p（内修订）：听力(52)标准答案只认权威字段 listenServerDesc（= DTO 的 desc）
                                     if (parseQType(q) == QT_LISTEN && map != null) {
                                         net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(i);
-                                        String txt = "";
-                                        if (u != null) {
-                                            if (u.listenServerDesc != null) txt = u.listenServerDesc;
-                                            if (XLModBank.isJunk(txt) && u.sContent != null) txt = u.sContent;
-                                            if (XLModBank.isJunk(txt) && u.answerContentList != null
-                                                    && !u.answerContentList.isEmpty()
-                                                    && u.answerContentList.get(0) != null) {
-                                                txt = String.valueOf(u.answerContentList.get(0));
-                                            }
-                                        }
+                                        String txt = (u == null || u.listenServerDesc == null) ? "" : u.listenServerDesc;
                                         if (!XLModBank.isJunk(txt)) {
                                             sDetailListenText.put(q.questionId, txt.trim());
                                             XLModConfig.kbPut(q.questionId, "L|" + txt.trim());
@@ -5903,14 +5888,9 @@ public class XLModHelper {
                                                     + " → " + txt.trim());
                                         }
                                     }
-                                    // V4.6p：填空(3)标准答案 = 详情答案映射的 answerContentList
-                                    if (parseQType(q) == QT_FILL && map != null) {
-                                        net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(i);
-                                        if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
-                                            XLModBank.putFillFromDetail(q.questionId,
-                                                    new java.util.ArrayList<String>(u.answerContentList),
-                                                    new java.util.ArrayList<String>(u.answerIdList));   // V5.0p：连空位ID一起存
-                                        }
+                                    // V5.0p（内修订）：填空也用**权威字段**入库（answers[].answerContent）
+                                    if (parseQType(q) == QT_FILL) {
+                                        if (harvestFillAuthoritative(q)) { /* 计数在结算采集里做 */ }
                                     }
                                 }
                                 updateFloatFromDetail(fAct);

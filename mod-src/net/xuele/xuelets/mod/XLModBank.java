@@ -184,27 +184,17 @@ public final class XLModBank {
                 }
             }
             if (type == QT_FILL) {
-                if (fill.length() == 0) {
-                    // V5.0p：没答案也先把题目收下来（答案等结算时从详情补，put() 会合并）
-                    noteQuestion(q, src);
-                    return false;
-                }
+                if (fill.length() == 0) return false;        // V5.0p（内修订）：没有权威答案就不入库
                 e.put("f", fill);
                 // V5.0p（内修订）：把每个空位的 answerId 一起存下 —— 作答时按空位ID对位，而不是按位次
                 e.put("fa", fillIds);
             } else if (type == QT_LISTEN) {
-                if (fill.length() == 0) {
-                    noteQuestion(q, src);
-                    return false;
-                }
+                if (fill.length() == 0) return false;        // V5.0p（内修订）：没有权威答案就不入库
                 e.put("l", fill.optString(0, "").trim());
             } else if (type == QT_SPOKEN) {
                 return false;                                 // 口语（51）是录音题：没有可填的文本答案
             } else {
-                if (right.length() == 0) {
-                    noteQuestion(q, src);                     // 只收了题目，等详情补答案
-                    return false;
-                }
+                if (right.length() == 0) return false;       // V5.0p（内修订）：没有权威答案就不入库（不做"先收题目后补答案"）
                 e.put("k", right);
             }
             if (opts.length() > 0) e.put("opts", opts);
@@ -468,16 +458,14 @@ public final class XLModBank {
                 if (o == null) continue;
                 String content = o.optString("c", "");
                 String aid = o.optString("i", "");
-                String letter = o.optString("d", "");
-                // V5.0p 加固：按"内容 → 选项ID → 服务器 sortid → 同位次"逐级匹配，
-                // 并记录用的是哪一级（弱匹配会在日志里标出来，便于排查 A/B 错位）
+                // V5.0p（内修订）：**只认"内容"或"选项ID"** —— 不再靠 sortid/位次猜（防 A/B 错位）
                 String way = "内容";
                 AnswersBean hit = byContent(cur, content);
                 if (hit == null) {
                     hit = byId(cur, aid);
                     way = "选项ID";
                 }
-                // V5.0p：内容命中但选项ID 指向另一个选项（同文本/空文本的坑）→ 以 ID 为准
+                // 内容命中但选项ID 指向另一个选项（同文本/空文本的坑）→ 以 ID 为准
                 if (hit != null && aid != null && !aid.trim().isEmpty()) {
                     AnswersBean byIdHit = byId(cur, aid);
                     if (byIdHit != null && byIdHit != hit) {
@@ -485,18 +473,10 @@ public final class XLModBank {
                         way = "选项ID(内容有歧义)";
                     }
                 }
+                // 内容与选项ID 都对不上 → 整题放弃（交给盲答），绝不拿猜出来的选项作答
                 if (hit == null) {
-                    hit = byLetter(cur, letter);
-                    way = "sortid";
-                }
-                if (hit == null) {
-                    hit = byIndex(cur, idx);
-                    way = "同位次";
-                }
-                if (hit == null) continue;
-                // V5.0p：题干签名兜底来的条目（不是同一道题的ID）不允许"猜"排序
-                if (sMatchedBySig && (way.startsWith("sortid") || way.startsWith("同位次"))) {
-                    XLModConfig.logAppend("[题库] 签名兜底 + 只能猜排序 → 放弃本题作答（避免 A/B 错位）");
+                    XLModConfig.logAppend("[题库] 该题未命中（内容/选项ID 都对不上）→ 放弃作答、交盲答: "
+                            + qid + "（记录项 id=" + aid + " 文本=" + safeCut(content, 20) + "）");
                     return false;
                 }
                 if (how.length() > 0) how.append("/");
@@ -509,10 +489,8 @@ public final class XLModBank {
             }
             if (matched > 0) {
                 String letters = lettersOf(q, ua.answerIdList);
-                boolean weak = how.indexOf("sortid") >= 0 || how.indexOf("同位次") >= 0;
                 XLModConfig.logAppend("[题库] 命中作答: " + qid + " → " + matched + " 项"
-                        + "（答案 " + letters + "，匹配=" + how + "）"
-                        + (weak ? "  ⚠弱匹配（内容/ID 都没对上，靠排序猜的，请核对）" : ""));
+                        + "（答案 " + letters + "，匹配=" + how + "）");
                 return true;
             }
         } catch (Throwable t) {

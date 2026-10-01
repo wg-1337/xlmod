@@ -155,8 +155,8 @@ ok('XLModBank.harvestQuestion(q, "detail")' in H, 'C1 详情接口数据也整�
 ok('XLModBank.putListen' in H and 'putListen' in B, 'C1 听力标准答案入库（详情 sContent）')
 ok('XLModBank.apply(q.questionId, q, ua)' in H and H.count('XLModBank.apply') >= 2,
    'C2 自动作答两处接入（buildAutoAnswer 预填 + applyApiAnswers 提交前）')
-ok('byContent(cur, content)' in B and 'byId(cur, aid)' in B and 'byLetter(cur, letter)' in B,
-   'C2 匹配顺序：选项文本优先 → 选项ID → 选项字母（顺序不同也能对上）')
+ok('byContent(cur, content)' in B and 'byId(cur, aid)' in B and 'byLetter(cur, letter)' not in B,
+   'C2 匹配顺序：选项文本 → 选项ID（V5.0p 内修订起不再有字母/位次猜测）')
 ok('xlmod_qbank.json' in B and 'DIRECTORY_DOWNLOADS' in B,
    'C3 题库落盘到 /sdcard/Download/xlmod_qbank.json（读不到则退私有目录）')
 ok('MAX_ITEMS' in B and 'trim()' in B, 'C3 题库上限 %s 题并淘汰最旧' % re.search(r'MAX_ITEMS = (\d+)', B).group(1))
@@ -263,14 +263,14 @@ ok(listen_fill(3, True, 'x') == '不处理', 'F5 填空(3) 走填空分支，不
 print("G. 听力答案来源 + 题库不再收盲填垃圾（V4.6p）")
 ok('listenServerDesc' in H and H.count('listenServerDesc') >= 3,
    'G1 听力标准答案取详情映射的 listenServerDesc（宿主 initAnswer 里 52 型答案就在这里）')
-ok('u.listenServerDesc' in H and 'isJunk(txt) && u.sContent != null' in H,
-   'G1 取值顺序：listenServerDesc → sContent → answerContentList（且逐级查垃圾）')
-ok('putFillFromDetail' in B and 'putFillFromDetail' in H,
-   'G1 填空题标准答案改由详情答案映射入库（answerContentList = 每空的 sContent）')
+ok('u.listenServerDesc' in H and 'u.sContent' not in H and 'u.answerContentList' not in H,
+   'G1 听力只认权威字段 listenServerDesc（不再回退 sContent/answerContentList —— 那是学生作答）')
+ok('putFillFromDetail' in B and 'harvestFillAuthoritative' in H and 'answers[].answerContent' in H,
+   'G1 填空题标准答案 = answers[].answerContent（与宿主答题详情页 getTrueAnswerList 同源）')
 ok('isJunk' in B and '盲填内容永不入库' in B,
    'G2 题库新增垃圾判定：盲填内容/空值永不入库')
-ok('noteQuestion(q, src);' in B and '没答案也先把题目收下来' in B,
-   'G2 填空/听力没正确标记时：只收题目、不把 answerContent 当标准答案（V5.0p 起）')
+ok('没有权威答案就不入库' in B,
+   'G2 没有权威答案的条目一律不入库（不把学生答案/盲填当标准答案）')
 ok('purgeJunkEntries' in B and '清理盲填垃圾' in B,
    'G2 载入题库时清理历史污染（丢弃答案全是垃圾的条目、剔除垃圾字段）')
 ok('kbPurgeJunk' in C and 'kb_junk_purged_v46' in C,
@@ -439,8 +439,8 @@ ok(settles(3, 2) is True, 'J3 本地总题数=3 → 第 3 题结算')
 print("K. 普通挑战题目收录 + 结算抓全部答案（V5.0p）")
 ok('noteQuestion' in B and '只收录题目本身' in B,
    'K1 题库新增 noteQuestion：没答案也先收录题目（题干+选项+题型）')
-ok('XLModBank.noteQuestion(ql.get(pos)' in H and 'ph.isChallengeClassmate ? "classmate" : "normal"' in H,
-   'K1 每题显示时收录（普通挑战也收，来源标 normal）')
+ok('noteQuestion(ql.get(pos)' not in H,
+   'K1 已取消答题时逐题收骨架（题目+答案统一在结算时由答题详情写入）')
 ok('if (!e.has("k") && old.has("k")) e.put("k", old.optJSONArray("k"));' in B,
    'K2 【修复】合并保留答案：以前"有答案的旧条目"会被"没答案的新条目"覆盖丢失')
 ok('hasAnswerFor' in B, 'K2 新增 hasAnswerFor（判断某题是否已收录答案）')
@@ -448,8 +448,8 @@ ok('（骨架）不动它' in B,
    'K2 清理逻辑不再误删"只有题目没答案"的骨架条目')
 ok('harvestChallengeDetail(challengeId, monthSubject,' in H and 'attempt' in H,
    'K3 结算采集带重试（attempt 计数）')
-ok('详情还没带答案 → ' in H and 'waits = {0, 1500, 3000, 6000, 10000, 10000}' in H,
-   'K3 结算刚落地详情没答案时：1.5s/3s/6s/10s 重试，直到拿到答案')
+ok('withAnswer < total' in H and 'waits = {0, 1500, 3000, 6000, 10000, 10000}' in H,
+   'K3 结算采集：只要还有题没拿到权威答案就 1.5s/3s/6s/10s 重试')
 ok('本机已收录题目 ' in H, 'K3 日志里报告"本机已收录题目 N 题"')
 
 print("K4 收录/合并算法镜像")
@@ -494,12 +494,12 @@ ok('（来源=本局详情）' in H and '（来源=题库）' in H and '（来�
    'L2 每次作答都记日志并标出来源（便于核对选的是哪一个选项）')
 ok('XLModBank.lettersOf(q, ua.answerIdList)' in H and 'public static String lettersOf' in B,
    'L2 日志用"界面显示字母"（宿主按显示顺序 65+i 分配）而非 sortid，避免误读')
-ok('弱匹配（内容/ID 都没对上，靠排序猜的，请核对）' in B,
-   'L3 题库里靠 sortid/同位次猜出来的匹配会被标成弱匹配告警')
+ok('该题未命中（内容/选项ID 都对不上）' in B,
+   'L3 题库只认"内容/选项ID"，对不上就放弃作答、交盲答（不再猜排序）')
 ok('sMatchedBySig' in B and 'optionsCompatible' in B and '题干相同但选项对不上' in B,
    'L3 题干签名兜底要求"选项也能对上"，否则放弃（同题干不同选项不再套用旧答案）')
-ok('签名兜底 + 只能猜排序 → 放弃本题作答' in B,
-   'L3 签名兜底来的条目不允许靠排序猜（宁可不答也不猜错）')
+ok('byLetter(cur, letter)' not in B and 'byIndex(cur, idx)' not in B,
+   'L3 已彻底移除 sortid/同位次 猜测路径（宁可不答也不猜错）')
 ok('内容有歧义' in B and 'byIdHit != hit' in B,
    'L3 选项内容相同/为空导致歧义时，以"选项ID"为准')
 ok('已有服务端详情答案，忽略 ' in B and '"detail".equals(oldSrc)' in B,
@@ -526,16 +526,7 @@ def match(entry, cur, by_sig=False):
             if o['i'] == aid and o is not hit:
                 hit, way = o, '选项ID(内容有歧义)'
                 break
-    if hit is None and letter:
-        for o in cur:
-            if o.get('d') == letter:
-                hit, way = o, 'sortid'
-                break
-    if hit is None:
-        hit, way = (cur[idx] if 0 <= idx < len(cur) else None), '同位次'
-    if hit is not None and by_sig and way in ('sortid', '同位次'):
-        return None, '签名兜底不猜'
-    return hit, way
+    return hit, way          # V5.0p 内修订：不再有 sortid/同位次 兜底
 
 
 base = [{'i': 'a1', 'c': '一', 'd': '1'}, {'i': 'a2', 'c': '二', 'd': '2'}, {'i': 'a3', 'c': '三', 'd': '3'}]
@@ -550,26 +541,26 @@ ok(h2['i'] == 'a2' and w2 == '内容', 'L5 选项被重排：仍按内容命中 
 e2 = {'i': 'a2', 'c': '二（改了文案）', 'd': '2', 'idx': 1}
 h3, w3 = match(e2, shuffled)
 ok(h3['i'] == 'a2' and w3 == '选项ID', 'L5 文案有出入时按选项ID命中')
-# 内容/ID 都对不上，只能猜排序：签名兜底必须放弃
+# 内容/ID 都对不上：一律放弃（不再猜排序）
 e3 = {'i': 'zz', 'c': '不存在', 'd': '2', 'idx': 1}
 h4, w4 = match(e3, shuffled, by_sig=True)
-ok(h4 is None and w4 == '签名兜底不猜', 'L5 签名兜底 + 只能猜排序 → 放弃（不会猜错成 A/B）')
+ok(h4 is None, 'L5 内容/选项ID 都对不上 → 放弃作答（绝不猜成 A/B）')
 
 print("M. 填空题按空位ID对位（V5.0p 内修订）")
 ok('public static void putFillFromDetail(String qid, java.util.List<String> texts, java.util.List<String> ids)' in B,
    'M1 putFillFromDetail 支持连空位ID一起入库')
 ok('e.put("fa", fillIds);' in B and 'fillIds.put(a.answerId' in B,
    'M1 题库里填空题答案带空位ID数组 fa')
-ok('new java.util.ArrayList<String>(u.answerIdList));' in H,
-   'M1 详情采集时把 answerIdList 一起交给题库')
+ok('ids.add((a == null || a.answerId == null) ? "" : a.answerId)' in H,
+   'M1 空位ID 取自 answers[].answerId（与宿主输入框/提交同一把键）')
 ok('按空位ID对位作答' in B and 'byBlankId' in B,
    'M2 作答时按当前题目的空位ID取文本（而不是按位次）')
 ok('空位ID一个都没对上' in B and '按位次作答' in B,
    'M2 ID 对不上时回退按位次并告警')
 ok('withIds' in H and '知识库按位次作答（旧格式）' in H,
    'M3 知识库 F| 升级为「空位ID=答案」，读时优先按ID对位')
-ok("fb.append(bid).append('=')" in H and "sb.append(bid).append('=')" in H,
-   'M3 F| 两个写入点都带上空位ID')
+ok("fb.append(bid).append('=')" in H,
+   'M3 F| 写入带上空位ID（统一在权威采集里写）')
 ok('fillFillBoxes' in H and 'mInputMagicEditTextMap' in H and 'mUserInputTextList' in H,
    'M4 把答案按空位ID写进真实输入框')
 ok('et.setText(txt);' in H,
@@ -602,6 +593,49 @@ ok(by_blank_id(rec_ids, rec_txt, rec_ids) == rec_txt, 'M6 顺序未变时两种�
 ok(by_blank_id(rec_ids, rec_txt, ['b9', 'b8']) == ['', ''],
    'M6 ID 完全不同 → 不猜（留空，交给盲填补齐）')
 
+print("N. 填空权威答案字段 + 只在结算时统一采集（V5.0p 内修订）")
+ok('harvestFillAuthoritative' in H and 'getTrueAnswerList' in H,
+   'N1 新增 harvestFillAuthoritative：按宿主"答题详情"页的口径取答案（getTrueAnswerList 同源）')
+ok('a.answerContent;' in H and 'std.add(t == null ? "" : t)' in H,
+   'N1 填空标准答案只取 answers[].answerContent（不是 sContent/answerContentList）')
+ok('sContent = 学生作答内容' in H,
+   'N1 代码注释写明为什么不能再用 sContent（那是学生作答，自动打时就是我们盲填的）')
+ok('putFillFromDetail(q.questionId, std, ids)' in H and 'putFillFromDetail' in B,
+   'N1 入库带空位ID（fa），作答时按空位ID对位')
+ok('u.answerContentList' not in H and 'u.answerIdList' not in H,
+   'N1 填空采集路径已完全不读答案映射的 answerContentList/answerIdList')
+ok('不再"先收题目、后补答案"' in H,
+   'N2 取消"先记录题目、后补答案"的骨架收录（题库只由结算时的答题详情写入）')
+ok('noteQuestion(ql.get(pos)' not in H,
+   'N2 答题时不再逐题写入骨架条目')
+ok('if (fill.length() == 0) return false;        // V5.0p（内修订）：没有权威答案就不入库' in B,
+   'N2 没有权威答案的条目不入库')
+ok('withAnswer < total && attempt < 5' in H and '还有 ' in H,
+   'N3 结算采集：只要还有题目没拿到权威答案就重试（最多 5 次）')
+ok('答题详情采集完成' in H and '权威答案入库' in H,
+   'N3 日志按"答题详情 / 权威答案"口径报告（题数、听力、填空）')
+
+print("N4 字段语义镜像（宿主怎么判标准答案）")
+
+
+def true_answer_fill(answers):
+    """镜像 QuestionAnswerViewV2.getTrueAnswerList：标准答案 = 每个空的 answerContent"""
+    return [a['answerContent'] for a in answers]
+
+
+def old_wrong_fill(answer_map):
+    """镜像旧实现：拿 answerContentList（= sContent 学生作答）当标准答案"""
+    return [a['sContent'] for a in answer_map]
+
+
+answers = [{'answerId': 'b1', 'answerContent': '三', 'sContent': '不会'},
+           {'answerId': 'b2', 'answerContent': '一', 'sContent': '不会'},
+           {'answerId': 'b3', 'answerContent': '二', 'sContent': ''}]
+ok(true_answer_fill(answers) == ['三', '一', '二'],
+   'N4 权威字段 answers[].answerContent → 三,一,二（正确答案）')
+ok(old_wrong_fill(answers) == ['不会', '不会', ''],
+   'N4 旧实现取 sContent → 不会,不会,(空) ← 这就是填空必然全错的原因')
+
 print('D. 版本与产物')
 ok('VERSION = "v5.0p"' in C, 'D1 XLModConfig.VERSION = v5.0p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
@@ -632,7 +666,7 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数', u'已撤下', u'详情还没带答案', u'收录题目'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数', u'已撤下', u'权威答案入库', u'收录题目'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
     ok(has('v5.0p'), 'D2 APK 内含版本号 v5.0p（密文解回原文）')
 else:
@@ -666,8 +700,8 @@ ok('applyBlindFallback(q, ua);' in H and H.count('applyBlindFallback') >= 3,
 ok('isAutoHarvestDetail' in C and 'auto_harvest_detail' in C, 'E3 开关：打完自动进挑战详情收集题目')
 ok('harvestChallengeDetail' in H and 'ChallengeDetailHelper.loadQuestionList' in H,
    'E3 走与结果页「查看详情」同一个接口收集（不弹页面）')
-ok('挑战详情采集开始' in H and '挑战详情采集完成' in H and '挑战详情采集失败' in H,
-   'E3 采集有开始/完成（题数、带答案数、题库增量）/失败日志')
+ok('答题详情采集完成' in H and '答题详情采集失败' not in H or '挑战详情采集失败' in H,
+   'E3 采集有开始/完成（题数、权威答案数、题库增量）/失败日志')
 ok('XLModBank.save(true)' in H, 'E3 采集完立刻落盘题库')
 ok('sLastBattleClassmate' in H, 'E3 采集日志区分同学对战 / 普通挑战')
 ok('打完自动进挑战详情收集题目' in A, 'E3 面板有该开关 + 说明')
