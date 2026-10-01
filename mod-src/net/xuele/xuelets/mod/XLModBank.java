@@ -293,6 +293,18 @@ public final class XLModBank {
             load();
             JSONObject old = sById.get(qid);
             if (old != null && old.optInt("t", 0) == e.optInt("t", 0)) {
+                // V5.0p：**来源优先级** —— 详情(detail)是服务端权威答案，
+                // 不让 classmate/normal 这些"本地推测"来源把它的答案覆盖掉（防 A/B 错位）
+                String oldSrc = old.optString("src", "");
+                String newSrc = e.optString("src", "");
+                boolean newIsAuthoritative = "detail".equals(newSrc);
+                boolean oldIsAuthoritative = "detail".equals(oldSrc);
+                if (oldIsAuthoritative && !newIsAuthoritative && hasAnswer(old)) {
+                    e.remove("k");
+                    e.remove("f");
+                    e.remove("l");
+                    XLModConfig.logAppend("[题库] 已有服务端详情答案，忽略 " + newSrc + " 来源的答案覆盖: " + qid);
+                }
                 // 答案字段：谁有留谁（新条目优先，缺的从旧条目继承）
                 if (!e.has("k") && old.has("k")) e.put("k", old.optJSONArray("k"));
                 if (!e.has("f") && old.has("f")) e.put("f", old.optJSONArray("f"));
@@ -397,6 +409,7 @@ public final class XLModBank {
             ua.answerIdList.clear();
             ua.answerContentList.clear();
             int matched = 0;
+            StringBuilder how = new StringBuilder();
             for (int i = 0; i < k.length(); i++) {
                 int idx = k.optInt(i, -1);
                 if (idx < 0 || idx >= opts.length()) continue;
@@ -405,10 +418,38 @@ public final class XLModBank {
                 String content = o.optString("c", "");
                 String aid = o.optString("i", "");
                 String letter = o.optString("d", "");
+                // V5.0p 加固：按"内容 → 选项ID → 服务器 sortid → 同位次"逐级匹配，
+                // 并记录用的是哪一级（弱匹配会在日志里标出来，便于排查 A/B 错位）
+                String way = "内容";
                 AnswersBean hit = byContent(cur, content);
-                if (hit == null) hit = byId(cur, aid);
-                if (hit == null) hit = byLetter(cur, letter);
+                if (hit == null) {
+                    hit = byId(cur, aid);
+                    way = "选项ID";
+                }
+                // V5.0p：内容命中但选项ID 指向另一个选项（同文本/空文本的坑）→ 以 ID 为准
+                if (hit != null && aid != null && !aid.trim().isEmpty()) {
+                    AnswersBean byIdHit = byId(cur, aid);
+                    if (byIdHit != null && byIdHit != hit) {
+                        hit = byIdHit;
+                        way = "选项ID(内容有歧义)";
+                    }
+                }
+                if (hit == null) {
+                    hit = byLetter(cur, letter);
+                    way = "sortid";
+                }
+                if (hit == null) {
+                    hit = byIndex(cur, idx);
+                    way = "同位次";
+                }
                 if (hit == null) continue;
+                // V5.0p：题干签名兜底来的条目（不是同一道题的ID）不允许"猜"排序
+                if (sMatchedBySig && (way.startsWith("sortid") || way.startsWith("同位次"))) {
+                    XLModConfig.logAppend("[题库] 签名兜底 + 只能猜排序 → 放弃本题作答（避免 A/B 错位）");
+                    return false;
+                }
+                if (how.length() > 0) how.append("/");
+                how.append(way);
                 ua.answerIdList.add(hit.answerId == null ? "" : hit.answerId);
                 String c = (hit.sortid != null && !hit.sortid.isEmpty()) ? hit.sortid
                         : (hit.answerContent == null ? "" : hit.answerContent);
@@ -416,7 +457,11 @@ public final class XLModBank {
                 matched++;
             }
             if (matched > 0) {
-                XLModConfig.logAppend("[题库] 命中作答: " + qid + " → " + matched + " 项（顺序已按当前题目重排）");
+                String letters = lettersOf(q, ua.answerIdList);
+                boolean weak = how.indexOf("sortid") >= 0 || how.indexOf("同位次") >= 0;
+                XLModConfig.logAppend("[题库] 命中作答: " + qid + " → " + matched + " 项"
+                        + "（答案 " + letters + "，匹配=" + how + "）"
+                        + (weak ? "  ⚠弱匹配（内容/ID 都没对上，靠排序猜的，请核对）" : ""));
                 return true;
             }
         } catch (Throwable t) {
@@ -469,8 +514,12 @@ public final class XLModBank {
         }
     }
 
+    /** V5.0p：上一次 find() 是否走了"题干签名"兜底（此时答案必须靠内容/ID 命中，不能猜排序） */
+    private static boolean sMatchedBySig = false;
+
     private static JSONObject find(String qid, M_ChallengeQuestion q) {
         load();
+        sMatchedBySig = false;
         if (qid != null && !qid.trim().isEmpty()) {
             JSONObject e = sById.get(qid.trim());
             if (e != null && hasAnswer(e)) return e;
@@ -480,7 +529,42 @@ public final class XLModBank {
         String id = sSig2Id.get(sig);
         if (id == null) return null;
         JSONObject e = sById.get(id);
-        return (e != null && hasAnswer(e)) ? e : null;
+        if (e == null || !hasAnswer(e)) return null;
+        // V5.0p：签名兜底必须"选项也能对上"才认，否则同题干不同选项会造成 A/B 错位
+        if (!optionsCompatible(e, q)) {
+            XLModConfig.logAppend("[题库] 题干相同但选项对不上 → 放弃签名匹配: " + safeCut(q.content, 40));
+            return null;
+        }
+        sMatchedBySig = true;
+        XLModConfig.logAppend("[题库] 题干签名匹配（非本题ID）: " + id + " ← " + safeCut(q.content, 40));
+        return e;
+    }
+
+    /** V5.0p：题库条目与当前题目的选项是否"对得上"（至少一个非空选项文本相同） */
+    private static boolean optionsCompatible(JSONObject e, M_ChallengeQuestion q) {
+        try {
+            JSONArray opts = e.optJSONArray("opts");
+            List<AnswersBean> cur = q.answers;
+            if (opts == null || opts.length() == 0) return true;      // 没记选项（老条目）→ 不拦
+            if (cur == null || cur.isEmpty()) return true;
+            int hit = 0;
+            for (int i = 0; i < opts.length(); i++) {
+                JSONObject o = opts.optJSONObject(i);
+                if (o == null) continue;
+                String c = norm(o.optString("c", ""));
+                if (c.isEmpty()) continue;
+                if (byContent(cur, c) != null) hit++;
+            }
+            return hit > 0;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    private static String safeCut(String s, int n) {
+        if (s == null) return "";
+        String t = s.trim();
+        return t.length() > n ? t.substring(0, n) + "…" : t;
     }
 
     private static AnswersBean byContent(List<AnswersBean> list, String content) {
@@ -507,6 +591,63 @@ public final class XLModBank {
             if (a != null && letter.trim().equalsIgnoreCase(a.sortid == null ? "" : a.sortid.trim())) return a;
         }
         return null;
+    }
+
+    /** V5.0p：最后一级兜底 —— 按记录时的数组下标找"同一个位次"的选项 */
+    private static AnswersBean byIndex(List<AnswersBean> list, int idx) {
+        if (idx < 0 || idx >= list.size()) return null;
+        return list.get(idx);
+    }
+
+    /**
+     * V5.0p：把一串 answerId 换算成"界面上显示的选项字母"（宿主是按显示顺序 65+i 分配字母的），
+     * 仅用于日志/展示，便于核对"前端选 A 后端算 B"这类错位。
+     */
+    public static String lettersOf(M_ChallengeQuestion q, java.util.List<String> ids) {
+        try {
+            if (q == null || q.answers == null || ids == null || ids.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < ids.size(); i++) {
+                String id = ids.get(i);
+                for (int j = 0; j < q.answers.size(); j++) {
+                    AnswersBean a = q.answers.get(j);
+                    if (a != null && a.answerId != null && a.answerId.equals(id)) {
+                        if (sb.length() > 0) sb.append(",");
+                        sb.append((char) ('A' + j));
+                        break;
+                    }
+                }
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * V5.0p：题库里这道题记录的正确答案 ID 集合（用于与"本局详情"的权威答案对比冲突）。
+     */
+    public static java.util.List<String> rightIdsOf(String qid) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        try {
+            if (qid == null) return out;
+            load();
+            JSONObject e = sById.get(qid.trim());
+            if (e == null) return out;
+            JSONArray opts = e.optJSONArray("opts");
+            JSONArray k = e.optJSONArray("k");
+            if (opts == null || k == null) return out;
+            for (int i = 0; i < k.length(); i++) {
+                int idx = k.optInt(i, -1);
+                if (idx < 0 || idx >= opts.length()) continue;
+                JSONObject o = opts.optJSONObject(idx);
+                if (o == null) continue;
+                String id = o.optString("i", "");
+                if (!id.isEmpty()) out.add(id);
+            }
+        } catch (Throwable t) {
+        }
+        return out;
     }
 
     // ================= 统计 / 维护 =================

@@ -483,7 +483,79 @@ ok(bank_usable({'id': 'q1', 't': 11, 'opts': [1, 2]}) is False,
    'K4 只有题目的骨架条目不会被拿去答题（不会污染作答）')
 ok(bank_usable({'id': 'q1', 't': 11, 'k': [1]}) is True, 'K4 收录了答案就能用来答题')
 
-print("D. 版本与产物")
+print("L. 误判排查：A/B 错位加固（V5.0p 内修订）")
+ok('XLModBank.rightIdsOf' in H and 'sameIdSet' in H and '答案冲突 qid=' in H,
+   'L1 答案冲突检测：题库答案 vs 本局详情答案不一致时打日志')
+ok('以详情为准并更新题库' in H and 'XLModBank.harvestQuestion(dq, "detail")' in H,
+   'L1 冲突时以"本局详情"为准，并用权威答案自愈题库条目')
+ok('// 1) **本局服务器详情优先**' in H and H.index('本局服务器详情优先') < H.index('XLModBank.apply(qid, q, ua)'),
+   'L1 【顺序修复】服务器详情排在题库之前（以前题库先命中就永远不看详情）')
+ok('（来源=本局详情）' in H and '（来源=题库）' in H and '（来源=知识库）' in H and '（来源=判题接口缓存）' in H,
+   'L2 每次作答都记日志并标出来源（便于核对选的是哪一个选项）')
+ok('XLModBank.lettersOf(q, ua.answerIdList)' in H and 'public static String lettersOf' in B,
+   'L2 日志用"界面显示字母"（宿主按显示顺序 65+i 分配）而非 sortid，避免误读')
+ok('弱匹配（内容/ID 都没对上，靠排序猜的，请核对）' in B,
+   'L3 题库里靠 sortid/同位次猜出来的匹配会被标成弱匹配告警')
+ok('sMatchedBySig' in B and 'optionsCompatible' in B and '题干相同但选项对不上' in B,
+   'L3 题干签名兜底要求"选项也能对上"，否则放弃（同题干不同选项不再套用旧答案）')
+ok('签名兜底 + 只能猜排序 → 放弃本题作答' in B,
+   'L3 签名兜底来的条目不允许靠排序猜（宁可不答也不猜错）')
+ok('内容有歧义' in B and 'byIdHit != hit' in B,
+   'L3 选项内容相同/为空导致歧义时，以"选项ID"为准')
+ok('已有服务端详情答案，忽略 ' in B and '"detail".equals(oldSrc)' in B,
+   'L4 题库来源优先级：detail（服务端）答案不被 classmate/normal 覆盖')
+
+print("L5 匹配优先级镜像（防 A/B 错位）")
+
+
+def match(entry, cur, by_sig=False):
+    """镜像 XLModBank.apply：内容 → 选项ID(歧义优先) → sortid → 同位次；签名兜底不许猜"""
+    aid, content, letter, idx = entry['i'], entry['c'], entry.get('d', ''), entry['idx']
+    hit, way = None, None
+    for o in cur:
+        if content and o['c'] == content:
+            hit, way = o, '内容'
+            break
+    if hit is None and aid:
+        for o in cur:
+            if o['i'] == aid:
+                hit, way = o, '选项ID'
+                break
+    if hit is not None and aid:
+        for o in cur:
+            if o['i'] == aid and o is not hit:
+                hit, way = o, '选项ID(内容有歧义)'
+                break
+    if hit is None and letter:
+        for o in cur:
+            if o.get('d') == letter:
+                hit, way = o, 'sortid'
+                break
+    if hit is None:
+        hit, way = (cur[idx] if 0 <= idx < len(cur) else None), '同位次'
+    if hit is not None and by_sig and way in ('sortid', '同位次'):
+        return None, '签名兜底不猜'
+    return hit, way
+
+
+base = [{'i': 'a1', 'c': '一', 'd': '1'}, {'i': 'a2', 'c': '二', 'd': '2'}, {'i': 'a3', 'c': '三', 'd': '3'}]
+shuffled = [{'i': 'a3', 'c': '三', 'd': '3'}, {'i': 'a1', 'c': '一', 'd': '1'}, {'i': 'a2', 'c': '二', 'd': '2'}]
+e = {'i': 'a2', 'c': '二', 'd': '2', 'idx': 1}
+
+h1, w1 = match(e, base)
+ok(h1['i'] == 'a2' and w1 == '内容', 'L5 选项顺序未变：按内容命中 a2（界面字母 B）')
+h2, w2 = match(e, shuffled)
+ok(h2['i'] == 'a2' and w2 == '内容', 'L5 选项被重排：仍按内容命中 a2（不是同位次猜的）')
+# 内容对不上、ID 还在：靠 ID
+e2 = {'i': 'a2', 'c': '二（改了文案）', 'd': '2', 'idx': 1}
+h3, w3 = match(e2, shuffled)
+ok(h3['i'] == 'a2' and w3 == '选项ID', 'L5 文案有出入时按选项ID命中')
+# 内容/ID 都对不上，只能猜排序：签名兜底必须放弃
+e3 = {'i': 'zz', 'c': '不存在', 'd': '2', 'idx': 1}
+h4, w4 = match(e3, shuffled, by_sig=True)
+ok(h4 is None and w4 == '签名兜底不猜', 'L5 签名兜底 + 只能猜排序 → 放弃（不会猜错成 A/B）')
+
+print('D. 版本与产物')
 ok('VERSION = "v5.0p"' in C, 'D1 XLModConfig.VERSION = v5.0p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 

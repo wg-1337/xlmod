@@ -3805,6 +3805,21 @@ public class XLModHelper {
     /** V5.0p：本机累计"只收题目、还没答案"的收录数（面板/日志用） */
     private static int sAutoNoteCount = 0;
 
+    /** V5.0p：两个 ID 集合是否等价（忽略顺序，用于答案冲突检测） */
+    private static boolean sameIdSet(java.util.List<String> a, java.util.List<String> b) {
+        try {
+            if (a == null || b == null) return false;
+            if (a.size() != b.size()) return false;
+            java.util.List<String> x = new java.util.ArrayList<String>(a);
+            java.util.List<String> y = new java.util.ArrayList<String>(b);
+            java.util.Collections.sort(x);
+            java.util.Collections.sort(y);
+            return x.equals(y);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static String joinList(java.util.List<String> list) {
         StringBuilder sb = new StringBuilder();
         for (String s : list) {
@@ -4779,15 +4794,8 @@ public class XLModHelper {
                 applyBlindFallback(q, ua);      // 没有选项数据（填空题常见）→ 盲填
                 return ua;
             }
-            // 1) 题库（同学对战采集）优先：按正确答案文本匹配当前题目的选项顺序
-            if (!qid.isEmpty() && XLModBank.apply(qid, q, ua)) {
-                return ua;
-            }
-            // 1.1) 旧知识库（赛后详情采集）兼容路径
-            if (!qid.isEmpty() && applyKb(qid, q, ua)) {
-                return ua;
-            }
-            // 1) 详情数据升级优先（含填空文本与 isCorrect）
+            // 1) **本局服务器详情优先**（V5.0p 顺序调整：以前题库排在详情前面，
+            //    题库里若有旧的/弱匹配的答案，就会"前端选了 A、服务端答案是 B"）
             M_ChallengeQuestion dq = sDetailMap.get(qid);
             if (dq != null && dq.answers != null) {
                 boolean anyMark = false;
@@ -4798,6 +4806,26 @@ public class XLModHelper {
                     }
                 }
                 if (anyMark) {
+                    // 冲突检测：题库记录的答案集合 vs 本局详情答案集合
+                    try {
+                        java.util.List<String> bankIds = XLModBank.rightIdsOf(qid);
+                        java.util.List<String> detailIds = new java.util.ArrayList<String>();
+                        for (AnswersBean a : dq.answers) {
+                            if (a.isCorrect != null && "1".equals(a.isCorrect.trim()) && a.answerId != null) {
+                                detailIds.add(a.answerId);
+                            }
+                        }
+                        if (!bankIds.isEmpty() && !sameIdSet(bankIds, detailIds)) {
+                            trace("[作答] ⚠答案冲突 qid=" + qid
+                                    + "：题库=" + joinList(bankIds) + "（界面字母 "
+                                    + XLModBank.lettersOf(q, bankIds) + "）"
+                                    + " vs 本局详情=" + joinList(detailIds) + "（界面字母 "
+                                    + XLModBank.lettersOf(q, detailIds) + "）→ 以详情为准并更新题库");
+                            XLModBank.harvestQuestion(dq, "detail");      // 用权威答案自愈题库
+                            XLModBank.save(true);
+                        }
+                    } catch (Throwable ignored) {
+                    }
                     ua.answerIdList.clear();
                     ua.answerContentList.clear();
                     for (AnswersBean a : dq.answers) {
@@ -4807,6 +4835,8 @@ public class XLModHelper {
                             ua.answerContentList.add(c == null ? "" : c);
                         }
                     }
+                    trace("[作答] 题型=" + parseQType(q) + " qid=" + qid + " 作答="
+                            + XLModBank.lettersOf(q, ua.answerIdList) + "（来源=本局详情）");
                     return ua;
                 }
                 // 填空：详情数据按空位顺序给出答案文本
@@ -4816,10 +4846,23 @@ public class XLModHelper {
                     for (AnswersBean a : dq.answers) {
                         ua.answerContentList.add(a.answerContent == null ? "" : a.answerContent);
                     }
+                    trace("[作答] 题型=3 qid=" + qid + " 作答=" + joinList(ua.answerContentList) + "（来源=本局详情）");
                     return ua;
                 }
             }
-            // 2) 判题接口缓存的正确答案ID
+            // 2) 题库（可能是同学对战采集或此前结算采集的答案）
+            if (!qid.isEmpty() && XLModBank.apply(qid, q, ua)) {
+                trace("[作答] 题型=" + parseQType(q) + " qid=" + qid + " 作答="
+                        + XLModBank.lettersOf(q, ua.answerIdList) + "（来源=题库）");
+                return ua;
+            }
+            // 2.1) 旧知识库（赛后详情采集）兼容路径
+            if (!qid.isEmpty() && applyKb(qid, q, ua)) {
+                trace("[作答] 题型=" + parseQType(q) + " qid=" + qid + " 作答="
+                        + XLModBank.lettersOf(q, ua.answerIdList) + "（来源=知识库）");
+                return ua;
+            }
+            // 3) 判题接口缓存的正确答案ID
             java.util.List<String> right = sApiRightIds.get(qid);
             if (right != null && !right.isEmpty()) {
                 ua.answerIdList.clear();
@@ -4831,9 +4874,13 @@ public class XLModHelper {
                         ua.answerContentList.add(c == null ? "" : c);
                     }
                 }
-                if (!ua.answerIdList.isEmpty()) return ua;
+                if (!ua.answerIdList.isEmpty()) {
+                    trace("[作答] 题型=" + parseQType(q) + " qid=" + qid + " 作答="
+                            + XLModBank.lettersOf(q, ua.answerIdList) + "（来源=判题接口缓存）");
+                    return ua;
+                }
             }
-            // 3) V4.4p：题库/接口都没命中 → 盲答兜底（选择题选 B、填空/听写乱填），
+            // 4) V4.4p：题库/接口都没命中 → 盲答兜底（选择题选 B、填空/听写乱填），
             //    只在自动打榜运行时生效（普通挑战本地没有答案标记，不兜底就会空着交卷）
             applyBlindFallback(q, ua);
         } catch (Throwable t) {
