@@ -3802,6 +3802,9 @@ public class XLModHelper {
         }
     }
 
+    /** V5.0p：本机累计"只收题目、还没答案"的收录数（面板/日志用） */
+    private static int sAutoNoteCount = 0;
+
     private static String joinList(java.util.List<String> list) {
         StringBuilder sb = new StringBuilder();
         for (String s : list) {
@@ -4447,10 +4450,19 @@ public class XLModHelper {
      * 同学对战虽然有本地答案，详情再采一遍也能补齐填空/听力。</p>
      */
     static void harvestChallengeDetail(String challengeId, String monthSubject, String reason) {
+        harvestChallengeDetail(challengeId, monthSubject, reason, 1);
+    }
+
+    /**
+     * V5.0p：结算采集带**重试** —— 结算刚提交完时详情接口可能还没带答案（isCorrect 全 0），
+     * 这时按 1.5s / 3s / 6s / 10s 重试几次，直到拿到答案或放弃。
+     */
+    static void harvestChallengeDetail(final String challengeId, final String monthSubject,
+                                       final String reason, final int attempt) {
         try {
             final int before = XLModBank.size();
             final String fReason = reason == null ? "" : reason;
-            trace("[题库] 挑战详情采集开始（" + fReason + "）：challengeId=" + shortId(challengeId)
+            trace("[题库] 挑战详情采集开始（" + fReason + "，第 " + attempt + " 次；本机已收录题目 " + sAutoNoteCount + " 题）：challengeId=" + shortId(challengeId)
                     + " monthSubject=" + monthSubject);
             net.xuele.xuelets.challenge.util.ChallengeDetailHelper.loadQuestionList(
                     challengeId, monthSubject,
@@ -4555,10 +4567,25 @@ public class XLModHelper {
                                     }
                                 }
                                 int now = XLModBank.size();
-                                trace("[题库] 挑战详情采集完成（" + fReason + "）：详情 "
+                                trace("[题库] 挑战详情采集完成（" + fReason + "，第 " + attempt + " 次）：详情 "
                                         + (list == null ? 0 : list.size()) + " 题，其中带答案 " + withAnswer
                                         + " 题，听力文本 " + listenGot + " 条；题库 " + before + " → " + now + " 题");
                                 XLModBank.save(true);
+                                // V5.0p：这轮没拿到答案 → 过一会儿再试（结算刚落地时详情常常还是空的）
+                                if (withAnswer == 0 && attempt < 5 && list != null && !list.isEmpty()) {
+                                    final long[] waits = {0, 1500, 3000, 6000, 10000, 10000};
+                                    long wait = waits[Math.min(attempt, waits.length - 1)];
+                                    final String fCh = challengeId;
+                                    final String fMs = monthSubject;
+                                    final String fR = fReason;
+                                    trace("[题库] 详情还没带答案 → " + (wait / 1000) + " 秒后重试（第 " + (attempt + 1) + " 次）");
+                                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            harvestChallengeDetail(fCh, fMs, fR, attempt + 1);
+                                        }
+                                    }, wait);
+                                }
                             } catch (Throwable t) {
                                 trace("[题库] 详情入库异常: " + t);
                             }
@@ -5322,6 +5349,17 @@ public class XLModHelper {
             }
             if (ph.isChallengeClassmate) {
                 XLModBank.harvestBattle(ph, sid);
+            }
+            // V5.0p：普通挑战（以及任何一局）的题目也先收录进题库（题干+选项），
+            // 答案等结算时从「挑战详情」补（put() 会合并到同一条目，不会覆盖已有答案）
+            try {
+                java.util.ArrayList<M_ChallengeQuestion> ql = ph.mQuestionList;
+                if (ql != null && pos >= 0 && pos < ql.size()) {
+                    if (XLModBank.noteQuestion(ql.get(pos), ph.isChallengeClassmate ? "classmate" : "normal")) {
+                        sAutoNoteCount++;
+                    }
+                }
+            } catch (Throwable ignored) {
             }
         } catch (Throwable t) {
         }

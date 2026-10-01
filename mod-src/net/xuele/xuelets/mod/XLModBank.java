@@ -99,6 +99,49 @@ public final class XLModBank {
     }
 
     /**
+     * V5.0p：**只收录题目本身**（题干 + 选项 + 题型），不要求有答案。
+     * 普通挑战的题目原本一个都不入库（本地没有答案标记），现在答题时先把题目收下来，
+     * 等结算时从「挑战详情」把答案补上（{@link #harvestQuestion} 会合并进同一条目）。
+     */
+    public static boolean noteQuestion(M_ChallengeQuestion q, String src) {
+        try {
+            if (!enabled() || q == null) return false;
+            String qid = q.questionId == null ? "" : q.questionId.trim();
+            if (qid.isEmpty()) return false;
+            int type = typeOf(q);
+            if (type == QT_SPOKEN) return false;            // 口语录音题没有文本答案，不收
+            JSONObject e = new JSONObject();
+            e.put("id", qid);
+            e.put("t", type);
+            e.put("c", cut(q.content, 300));
+            e.put("src", src == null ? "" : src);
+            e.put("ts", System.currentTimeMillis());
+            JSONArray opts = new JSONArray();
+            List<AnswersBean> ans = q.answers;
+            if (ans != null) {
+                for (int i = 0; i < ans.size(); i++) {
+                    AnswersBean a = ans.get(i);
+                    if (a == null) continue;
+                    JSONObject o = new JSONObject();
+                    o.put("i", a.answerId == null ? "" : a.answerId);
+                    o.put("c", cut(a.answerContent, 200));
+                    o.put("d", a.sortid == null ? "" : a.sortid);
+                    opts.put(o);
+                }
+            }
+            if (opts.length() > 0) e.put("opts", opts);
+            e.put("sig", sigOf(type, q.content));
+            put(qid, e);                                    // put() 会继承旧条目里已有的答案
+            sDirty = true;
+            save(false);
+            return true;
+        } catch (Throwable t) {
+            sLastError = String.valueOf(t);
+            return false;
+        }
+    }
+
+    /**
      * 单题入库（同学对战 / 详情接口共用）。
      *
      * <p><b>V4.6p 重要修正</b>：填空(3)/听力(52) 的文本答案**只认"带正确标记"的**；
@@ -139,15 +182,25 @@ public final class XLModBank {
                 }
             }
             if (type == QT_FILL) {
-                if (fill.length() == 0) return false;        // 没标记就不入库（标准答案走 putFillFromDetail）
+                if (fill.length() == 0) {
+                    // V5.0p：没答案也先把题目收下来（答案等结算时从详情补，put() 会合并）
+                    noteQuestion(q, src);
+                    return false;
+                }
                 e.put("f", fill);
             } else if (type == QT_LISTEN) {
-                if (fill.length() == 0) return false;         // 听力标准答案走 putListen（listenServerDesc）
+                if (fill.length() == 0) {
+                    noteQuestion(q, src);
+                    return false;
+                }
                 e.put("l", fill.optString(0, "").trim());
             } else if (type == QT_SPOKEN) {
                 return false;                                 // 口语（51）是录音题：没有可填的文本答案
             } else {
-                if (right.length() == 0) return false;        // 没有正确标记的题目不入库（避免污染）
+                if (right.length() == 0) {
+                    noteQuestion(q, src);                     // 只收了题目，等详情补答案
+                    return false;
+                }
                 e.put("k", right);
             }
             if (opts.length() > 0) e.put("opts", opts);
@@ -229,15 +282,29 @@ public final class XLModBank {
         }
     }
 
+    /**
+     * 写入/合并条目。
+     *
+     * <p><b>V5.0p 修复</b>：以前"旧条目有答案、新条目没答案"时会把整个条目换成新的 →
+     * **已收录的答案被覆盖丢失**。现在改成**合并**：新条目缺的答案字段从旧条目继承。</p>
+     */
     private static void put(String qid, JSONObject e) {
         try {
             load();
             JSONObject old = sById.get(qid);
-            // 已有更完整的记录（带答案）时不覆盖
-            if (old != null && hasAnswer(old) && !hasAnswer(e) && old.optInt("t", 0) == e.optInt("t", 0)) {
-                long ts = old.optLong("ts", 0L);
-                e.put("ts", ts);
-                e.put("src", old.optString("src", ""));       // 保留首次来源
+            if (old != null && old.optInt("t", 0) == e.optInt("t", 0)) {
+                // 答案字段：谁有留谁（新条目优先，缺的从旧条目继承）
+                if (!e.has("k") && old.has("k")) e.put("k", old.optJSONArray("k"));
+                if (!e.has("f") && old.has("f")) e.put("f", old.optJSONArray("f"));
+                if (!e.has("l") && old.has("l")) e.put("l", old.optString("l", ""));
+                if (e.optJSONArray("opts") == null && old.optJSONArray("opts") != null) {
+                    e.put("opts", old.optJSONArray("opts"));
+                }
+                if ((e.optString("c", "")).isEmpty() && !old.optString("c", "").isEmpty()) {
+                    e.put("c", old.optString("c", ""));
+                }
+                if (old.optString("src", "").length() > 0) e.put("src", old.optString("src", ""));
+                if (old.optLong("ts", 0L) > 0) e.put("ts", old.optLong("ts", 0L));
             }
             sById.put(qid, e);
             String sig = e.optString("sig", "");
@@ -246,6 +313,17 @@ public final class XLModBank {
             if (sById.size() > MAX_ITEMS) trim();
         } catch (Throwable t) {
             sLastError = String.valueOf(t);
+        }
+    }
+
+    /** 某题是否已经收录到答案（面板/日志用） */
+    public static boolean hasAnswerFor(String qid) {
+        try {
+            load();
+            if (qid == null) return false;
+            return hasAnswer(sById.get(qid.trim()));
+        } catch (Throwable t) {
+            return false;
         }
     }
 
@@ -548,6 +626,8 @@ public final class XLModBank {
                 if (e == null) continue;
                 int type = e.optInt("t", 0);
                 if (type != QT_FILL && type != QT_LISTEN) continue;
+                // V5.0p：只收题目、还没答案的条目（骨架）不动它 —— 等详情补答案
+                if (!e.has("f") && !e.has("l") && !e.has("k")) continue;
                 boolean hasReal = false;
                 JSONArray f = e.optJSONArray("f");
                 if (f != null) {

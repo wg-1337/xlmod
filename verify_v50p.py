@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.9q 全部新功能：
+"""验证 V5.0p 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.9q（唯一来源）
+   D1 XLModConfig.VERSION = v5.0p（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -269,8 +269,8 @@ ok('putFillFromDetail' in B and 'putFillFromDetail' in H,
    'G1 填空题标准答案改由详情答案映射入库（answerContentList = 每空的 sContent）')
 ok('isJunk' in B and '盲填内容永不入库' in B,
    'G2 题库新增垃圾判定：盲填内容/空值永不入库')
-ok('没标记就不入库（标准答案走 putFillFromDetail）' in B,
-   'G2 填空/听力不再"没标记就拿 answerContent 当标准答案"（V4.6p 关闭污染源）')
+ok('noteQuestion(q, src);' in B and '没答案也先把题目收下来' in B,
+   'G2 填空/听力没正确标记时：只收题目、不把 answerContent 当标准答案（V5.0p 起）')
 ok('purgeJunkEntries' in B and '清理盲填垃圾' in B,
    'G2 载入题库时清理历史污染（丢弃答案全是垃圾的条目、剔除垃圾字段）')
 ok('kbPurgeJunk' in C and 'kb_junk_purged_v46' in C,
@@ -436,8 +436,55 @@ ok(settles(20, 19) is True, 'J3 本地总题数=20 → 第 20 题（pos 19）宿
 ok(settles(20, 18) is False, 'J3 第 19 题还没到 → 继续答')
 ok(settles(3, 2) is True, 'J3 本地总题数=3 → 第 3 题结算')
 
+print("K. 普通挑战题目收录 + 结算抓全部答案（V5.0p）")
+ok('noteQuestion' in B and '只收录题目本身' in B,
+   'K1 题库新增 noteQuestion：没答案也先收录题目（题干+选项+题型）')
+ok('XLModBank.noteQuestion(ql.get(pos)' in H and 'ph.isChallengeClassmate ? "classmate" : "normal"' in H,
+   'K1 每题显示时收录（普通挑战也收，来源标 normal）')
+ok('if (!e.has("k") && old.has("k")) e.put("k", old.optJSONArray("k"));' in B,
+   'K2 【修复】合并保留答案：以前"有答案的旧条目"会被"没答案的新条目"覆盖丢失')
+ok('hasAnswerFor' in B, 'K2 新增 hasAnswerFor（判断某题是否已收录答案）')
+ok('（骨架）不动它' in B,
+   'K2 清理逻辑不再误删"只有题目没答案"的骨架条目')
+ok('harvestChallengeDetail(challengeId, monthSubject,' in H and 'attempt' in H,
+   'K3 结算采集带重试（attempt 计数）')
+ok('详情还没带答案 → ' in H and 'waits = {0, 1500, 3000, 6000, 10000, 10000}' in H,
+   'K3 结算刚落地详情没答案时：1.5s/3s/6s/10s 重试，直到拿到答案')
+ok('本机已收录题目 ' in H, 'K3 日志里报告"本机已收录题目 N 题"')
+
+print("K4 收录/合并算法镜像")
+
+
+def merge(old, new):
+    """镜像 XLModBank.put 的合并规则：答案字段谁有留谁"""
+    out = dict(new)
+    for k in ('k', 'f', 'l'):
+        if k not in out and k in old:
+            out[k] = old[k]
+    if 'opts' not in out and 'opts' in old:
+        out['opts'] = old['opts']
+    return out
+
+
+old_entry = {'id': 'q1', 't': 11, 'opts': [{'i': 'a1'}, {'i': 'a2'}], 'k': [1], 'src': 'detail'}
+new_entry = {'id': 'q1', 't': 11, 'opts': [{'i': 'a1'}, {'i': 'a2'}]}      # 只收题目、无答案
+m = merge(old_entry, new_entry)
+ok(m.get('k') == [1], 'K4 旧条目有答案 + 新收录只有题目 → 答案被保留（V5.0p 修复点）')
+ok(merge({'id': 'q2', 't': 11}, {'id': 'q2', 't': 11, 'k': [0]}).get('k') == [0],
+   'K4 新条目带答案 → 用新答案')
+
+
+def bank_usable(entry):
+    """镜像 apply()：只有带答案的条目才会被用来答题"""
+    return bool(entry.get('k') or entry.get('f') or entry.get('l'))
+
+
+ok(bank_usable({'id': 'q1', 't': 11, 'opts': [1, 2]}) is False,
+   'K4 只有题目的骨架条目不会被拿去答题（不会污染作答）')
+ok(bank_usable({'id': 'q1', 't': 11, 'k': [1]}) is True, 'K4 收录了答案就能用来答题')
+
 print("D. 版本与产物")
-ok('VERSION = "v4.9q"' in C, 'D1 XLModConfig.VERSION = v4.9q')
+ok('VERSION = "v5.0p"' in C, 'D1 XLModConfig.VERSION = v5.0p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -466,9 +513,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数', u'已撤下'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数', u'已撤下', u'详情还没带答案', u'收录题目'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.9q'), 'D2 APK 内含版本号 v4.9q（密文解回原文）')
+    ok(has('v5.0p'), 'D2 APK 内含版本号 v5.0p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
