@@ -3439,7 +3439,7 @@ public class XLModHelper {
             if (!XLModConfig.isAutoChallenge()) return 0;
             if (sAutoStep != 1 && sAutoStep != 2) return 0;
             // 服务端：每科每天最多三次 —— 本阶段视为打完
-            sAutoBattlesThisSubject = XLModConfig.getBattlesPerSubject();
+            sAutoBattlesThisSubject = effectiveCap();
             sAutoWaitingBattle = false;
             if (needSwitchToNormal()) {
                 // V4.4p：同学对战次数用完 → 还有普通挑战可打，交给 rank onResume 切阶段
@@ -3576,9 +3576,29 @@ public class XLModHelper {
         return k == 1 ? "只打普通挑战" : (k == 2 ? "同学对战+普通挑战" : "只打同学对战");
     }
 
-    /** 是否需要从"同学对战"转到"普通挑战"（kind=2 且本学科对战已打满） */
+    /** V4.7p：本阶段的有效上限（无限刷时 = unlimitedSwitchAfter，0 = 一直打当前学科不换科） */
+    private static int effectiveCap() {
+        try {
+            if (XLModConfig.isChallengeUnlimited()) {
+                int u = XLModConfig.getUnlimitedSwitchAfter();
+                return u <= 0 ? Integer.MAX_VALUE : u;
+            }
+            return XLModConfig.getBattlesPerSubject();
+        } catch (Throwable t) {
+            return XLModConfig.getBattlesPerSubject();
+        }
+    }
+
+    /** 是否需要从"同学对战"转到"普通挑战"（kind=2 且本学科对战已打满；无限刷时不回转） */
     private static boolean needSwitchToNormal() {
+        if (XLModConfig.isChallengeUnlimited()) return false;
         return XLModConfig.getChallengeKind() == 2 && !sAutoPhaseNormal;
+    }
+
+    /** V4.7p：无限刷时始终打"普通挑战"（积分来源） */
+    private static boolean initialPhaseNormal() {
+        if (XLModConfig.isChallengeUnlimited()) return true;
+        return XLModConfig.getChallengeKind() == 1;
     }
 
     /** 由 MainActivity.onResume(经autoSignIfNeeded) 触发：到点且未完成 → 启动当天打榜 */
@@ -3592,7 +3612,7 @@ public class XLModHelper {
                 sAutoSubjectIdx = 0;
                 sAutoBattlesThisSubject = 0;
                 sAutoWaitingBattle = false;
-                sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1);
+                sAutoPhaseNormal = initialPhaseNormal();
                 syncAutoActive();
             }
             String uid = net.xuele.android.common.login.LoginManager.getInstance().getUserId();
@@ -3627,7 +3647,7 @@ public class XLModHelper {
             sAutoSubjectIdx = 0;
             sAutoBattlesThisSubject = 0;
             sAutoWaitingBattle = false;
-            sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1);
+            sAutoPhaseNormal = initialPhaseNormal();
             sAutoSubjects = null;
             trace("自动打榜: 手动触发单次流程（" + phaseName() + "）");
             startScan(act);
@@ -3789,6 +3809,58 @@ public class XLModHelper {
         return sb.toString();
     }
 
+    // ================= 普通挑战无限刷（V4.7p，客户端核实后的两个放行点） =================
+    private static boolean sUnlimitedLogged = false;
+
+    /**
+     * 挂点：{@code ChallengeParamHelper$3.callback()} 顶部（榜页点「普通挑战」后的次数校验回调）。
+     * 服务端 normalTime 为 0 时宿主直接提示"每天每个科目最多可挑战 N 次"而不开局；
+     * 打开「普通挑战无限刷」就把次数顶上去，让开局继续。
+     */
+    public static void forceUnlimitedNormalCount(Object callback) {
+        try {
+            if (!XLModConfig.isChallengeUnlimited()) return;
+            if (callback == null) return;
+            Object helper = getFieldValue(callback, "this$0");       // ChallengeParamHelper
+            Object selector = getFieldValue(helper, "mHelper");      // ChallengeRankSelectorHelper
+            if (selector == null) return;
+            java.lang.reflect.Field f = findField(selector.getClass(), "challengeSubjectTime");
+            if (f == null) return;
+            f.setAccessible(true);
+            Object cur = f.get(selector);
+            int now = (cur instanceof Integer) ? (Integer) cur : 0;
+            if (now <= 0) {
+                f.setInt(selector, 999);
+                trace("[无限刷] 榜页次数=" + now + " → 999（放行普通挑战）");
+            }
+        } catch (Throwable t) {
+            trace("[无限刷] 次数放行异常: " + t);
+        }
+    }
+
+    /**
+     * 挂点：{@code ChallengeQuestionBaseActivity$5.onReqSuccess(RE_CostChallengeCount)} 顶部。
+     * 服务端返回"次数已用完"（functionCode != 1）时，宿主会弹窗并退出；打开无限刷就把它改成成功，
+     * 于是答题界面正常打开、答题与积分照常（服务端并不在此处拦截）。
+     */
+    public static void forceCostSuccess(Object reCost) {
+        try {
+            if (!XLModConfig.isChallengeUnlimited()) return;
+            if (reCost == null) return;
+            java.lang.reflect.Field f = findField(reCost.getClass(), "functionCode");
+            if (f == null) return;
+            f.setAccessible(true);
+            Object cur = f.get(reCost);
+            int now = (cur instanceof Integer) ? (Integer) cur : 0;
+            if (now != 1) {
+                f.setInt(reCost, 1);
+                trace("[无限刷] 服务端扣次返回 " + now + " → 当作成功（次数不拦答题）");
+            }
+        } catch (Throwable t) {
+            trace("[无限刷] 扣次放行异常: " + t);
+        }
+    }
+
     private static void startWithSubjects(Activity act, String[] subs) {
         try {
             if (subs == null || subs.length == 0) {
@@ -3804,7 +3876,7 @@ public class XLModHelper {
             sAutoSubjects = subs;
             sAutoSubjectIdx = 0;
             sAutoBattlesThisSubject = 0;
-            sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1);
+            sAutoPhaseNormal = initialPhaseNormal();
             sAutoStep = 1;
             sFetchFailCount = 0;
             syncAutoActive();
@@ -3907,7 +3979,7 @@ public class XLModHelper {
             if (!XLModConfig.isAutoChallenge()) return;
             if (sAutoStep != 1) return;
             syncAutoActive();
-            trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + XLModConfig.getBattlesPerSubject()
+            trace("自动打榜: rank恢复 step=1 本学科=" + sAutoBattlesThisSubject + "/" + effectiveCap()
                     + "（" + phaseName() + "）");
             String[] subs = sAutoSubjects != null ? sAutoSubjects : parseSubjects(XLModConfig.getChallengeSubjects());
             if (subs.length == 0) return;
@@ -3917,7 +3989,7 @@ public class XLModHelper {
                 sAutoWaitingBattle = false;
                 sAutoBattlesThisSubject++;
                 sAutoStep = 1;
-            }            if (sAutoBattlesThisSubject >= XLModConfig.getBattlesPerSubject()) {
+            }            if (sAutoBattlesThisSubject >= effectiveCap()) {
                 // 本阶段（同学对战 / 普通挑战）打满：V4.4p 先看要不要转"普通挑战"，否则换下一学科
                 if (needSwitchToNormal()) {
                     sAutoPhaseNormal = true;
@@ -4737,24 +4809,42 @@ public class XLModHelper {
             if (kb != null && kb.startsWith("L|") && !XLModBank.isJunk(kb.substring(2))) {
                 return kb.substring(2).trim();
             }
-            String fromBank = XLModBank.listenTextOf(qid);    // 题库
+            String fromBank = XLModBank.listenTextOf(qid);    // 题库（按听力类型查）
             if (fromBank != null && !XLModBank.isJunk(fromBank)) return fromBank;
+            String any = XLModBank.anyTextOf(qid);            // V4.7p：题库里任何题型存的文本都试
+            if (any != null && !XLModBank.isJunk(any)) return any;
             return "";
         } catch (Throwable t) {
             return "";
         }
     }
 
-    /** 听力答案回填：写入用户答案映射（供提交） + 尽力同步到界面输入框 */
-    private static void applyListenAnswer(Activity act, net.xuele.xuelets.challenge.util.ChallengeParamHelper ph,
-                                          M_ChallengeQuestion q, int pos) {
+    /** 听力答案回填：写入用户答案映射（供提交） + 尽力同步到界面输入框；返回是否写入成功 */
+    private static boolean applyListenAnswer(Activity act, net.xuele.xuelets.challenge.util.ChallengeParamHelper ph,
+                                             M_ChallengeQuestion q, int pos) {
+        return applyListenAnswer(act, ph, q, pos, false);
+    }
+
+    /**
+     * V4.7p：{@code force=true} 表示"当前页面确实是听力 Fragment"（即使 qType 不是 52 也照填）。
+     *
+     * @return true = 已经拿到答案并写进输入框（调用方可停止重试）
+     */
+    private static boolean applyListenAnswer(Activity act, net.xuele.xuelets.challenge.util.ChallengeParamHelper ph,
+                                             M_ChallengeQuestion q, int pos, boolean force) {
         try {
-            if (!(XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat())) return;
-            if (act == null || q == null || parseQType(q) != QT_LISTEN) return;
+            if (!(XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat())) {
+                return false;
+            }
+            if (act == null || q == null) return false;
+            if (!force && parseQType(q) != QT_LISTEN) return false;
             String qid = q.questionId == null ? "" : q.questionId;
-            if (qid.isEmpty()) return;
+            if (qid.isEmpty()) return false;
             String text = listenAnswer(qid);
-            if (text == null || text.isEmpty()) return;
+            if (text == null || text.isEmpty()) {
+                trace("[听力] 暂无可填答案（" + qid + "）：" + listenDiag(qid, q));
+                return false;
+            }
             if (ph != null && ph.mUserAnswerMap != null) {
                 net.xuele.android.ui.question.ChallengeUserAnswer ua = ph.mUserAnswerMap.get(pos);
                 if (ua != null) {
@@ -4763,9 +4853,69 @@ public class XLModHelper {
                 }
             }
             setListenEditText(act, text);
-            trace("自动作答: 听力填答 " + qid);
+            trace("自动作答: 听力填答 " + qid + " → " + text);
+            return true;
         } catch (Throwable t) {
+            return false;
         }
+    }
+
+    /**
+     * V4.7p：当前页面的题目 Fragment 是不是"听力题"（看类名/有没有输入框，不依赖 qType 数字）。
+     * 这样即使某天题型 id 变了，听力回填照样生效。
+     */
+    private static boolean currentFragmentIsListen(Activity act) {
+        try {
+            Object frag = currentFragment(act);
+            if (frag == null) return false;
+            String cn = frag.getClass().getName();
+            if (cn != null && cn.contains("Listen")) return true;
+            return findListenEditText(frag) != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static Object currentFragment(Activity act) {
+        try {
+            java.lang.reflect.Field f = findField(act.getClass(), "mPagerAdapter");
+            if (f == null) return null;
+            f.setAccessible(true);
+            Object adapter = f.get(act);
+            if (adapter == null) return null;
+            return adapter.getClass().getMethod("getCurrentPrimaryItem").invoke(adapter);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** V4.7p：听力答案来源诊断（排障用：一行看清每个来源有没有值） */
+    private static String listenDiag(String qid, M_ChallengeQuestion q) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("kb=").append(short0(XLModConfig.kbGet(qid)));
+            sb.append(" 详情缓存=").append(short0(sDetailListenText.get(qid)));
+            sb.append(" 题库=").append(short0(XLModBank.anyTextOf(qid)));
+            if (q != null) {
+                sb.append(" 题型=").append(q.qType);
+                sb.append(" 选项数=").append(q.answers == null ? 0 : q.answers.size());
+                if (q.answers != null && !q.answers.isEmpty()) {
+                    sb.append(" 首选项文本=").append(short0(q.answers.get(0).answerContent));
+                    sb.append(" 首选项isCorrect=").append(q.answers.get(0).isCorrect);
+                }
+                sb.append(" solution=").append(short0(q.solution));
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            return "诊断异常 " + t;
+        }
+    }
+
+    private static String short0(String s) {
+        if (s == null) return "(null)";
+        String t = s.trim();
+        if (t.isEmpty()) return "(空)";
+        return t.length() > 24 ? t.substring(0, 24) + "…" : t;
     }
 
     /** 按当前题目上下文回填（详情异步回来后调用） */
@@ -5079,11 +5229,11 @@ public class XLModHelper {
             }
         } catch (Throwable t) {
         }
-        // ===== 自动作答复用（与"答案悬浮窗"开关解耦）=====
-        // 听力题(51)的答案只能从详情接口拿；而详情拉取原先写在 isShowAnswerFloat() 判断之后，
-        // 于是"只开自动作答、不开悬浮窗"时永远拿不到答案 → 提交时输入框是空的。
-        // 这里把题上下文登记 + 详情拉取提前到开关判断之前（同学对战同样适用）。
-        if (XLModConfig.isAutoAnswer()) {
+        // ===== 自动作答/悬浮窗共用：听力题上下文登记 + 详情拉取 + 定时反复回填（V4.7p 加固）=====
+        // 听力题(52)的答案只能从详情接口（listenServerDesc）拿到，而详情是异步的：
+        // 这里登记上下文、立刻拉一次详情，并**每秒重试回填**（最多 12 次），
+        // 直到输入框里出现答案为止 —— 不再依赖"某一次恰好赶上"。
+        if (XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat()) {
             try {
                 java.util.ArrayList<M_ChallengeQuestion> qList0 = ph.mQuestionList;
                 if (qList0 != null && pos >= 0 && pos < qList0.size()) {
@@ -5099,19 +5249,32 @@ public class XLModHelper {
                             if (ph.mHelper != null) sFloatMonthSubject = ph.mHelper.getCurMonthSubject();
                         } catch (Throwable t) {
                         }
-                        if (parseQType(q0) == QT_LISTEN) {
-                            applyListenAnswer(act, ph, q0, pos);
-                            fetchByDetail(act); // 结果 → sDetailListenText → 回来后 applyListenAnswerCurrent 回填输入框
+                        // 是否听力题：题型 id 命中 **或** 当前 Fragment 就是听力页（双保险）
+                        final boolean isListen = parseQType(q0) == QT_LISTEN || currentFragmentIsListen(act);
+                        if (isListen) {
+                            applyListenAnswer(act, ph, q0, pos, true);
+                            fetchByDetail(act);   // 结果 → sDetailListenText → 回来后 applyListenAnswerCurrent 回填
                             final Activity fAct0 = act;
                             final net.xuele.xuelets.challenge.util.ChallengeParamHelper fPh0 = ph;
                             final M_ChallengeQuestion fQ0 = q0;
                             final int fPos0 = pos;
-                            act.getWindow().getDecorView().postDelayed(new Runnable() {
+                            final int[] tries = {0};
+                            final Runnable[] fill = new Runnable[1];
+                            fill[0] = new Runnable() {
                                 @Override
                                 public void run() {
-                                    applyListenAnswer(fAct0, fPh0, fQ0, fPos0);
+                                    try {
+                                        tries[0]++;
+                                        boolean ok = applyListenAnswer(fAct0, fPh0, fQ0, fPos0, true);
+                                        if (!ok && tries[0] < 12) {
+                                            fetchByDetail(fAct0);          // 再催一次详情
+                                            fAct0.getWindow().getDecorView().postDelayed(fill[0], 1000);
+                                        }
+                                    } catch (Throwable ignored) {
+                                    }
                                 }
-                            }, 1800);
+                            };
+                            act.getWindow().getDecorView().postDelayed(fill[0], 1000);
                         }
                     }
                 }

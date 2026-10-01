@@ -667,7 +667,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.6p";
+    public static final String VERSION = "v4.7p";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -881,6 +881,38 @@ public class XLModConfig {
 
     public static void setAutoHarvestDetail(boolean v) {
         wb("auto_harvest_detail", v);
+    }
+
+    // ============ 普通挑战无限刷（V4.7p） ============
+    /**
+     * 客户端核实结论（V4.7p）：
+     * <pre>
+     * ChallengeQuestionBaseActivity.initQuestion():
+     *   if (isActivityChallenge()) mHasConsumeCount = true;                 // 活动挑战：视为已扣次
+     *   if (isActivityChallenge() || !LoginManager.isStudent())
+     *        loadingSuccess(...);                                          // ← 根本不调 costChallengeCount
+     *   else consumeTicket();                                              // ← 学生普通挑战才调服务端扣次
+     * </pre>
+     * 也就是说"次数"只是**开局时的一次服务端记账**（competition/costChallengeCount，返回 functionCode==1 才算成功），
+     * 客户端用 `challengeSubjectTime(=normalTime) <= 0` 拦住入口、用 `isCostSuccess()` 拦住开局；
+     * 答题/交卷（competition/submitChallenge）与积分结算**不看次数**。
+     * 打开本开关即：① 榜页次数<=0 也放行；② 服务端说"次数用完"也当作成功继续开局 → 可以无限刷普通挑战。
+     */
+    public static boolean isChallengeUnlimited() {
+        return b("challenge_unlimited", false);
+    }
+
+    public static void setChallengeUnlimited(boolean v) {
+        wb("challenge_unlimited", v);
+    }
+
+    /** 无限刷时"打满多少局就换下一科"仍沿用每学科次数；0 表示一直打当前学科 */
+    public static int getUnlimitedSwitchAfter() {
+        return i("unlimited_switch_after", 0);
+    }
+
+    public static void setUnlimitedSwitchAfter(int v) {
+        wi("unlimited_switch_after", v < 0 ? 0 : v);
     }
 
     /**

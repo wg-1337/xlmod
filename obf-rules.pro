@@ -37,6 +37,8 @@
     java.lang.String withUid(java.lang.String, java.lang.String);
     void autoOnSubjectsList(android.app.Activity, net.xuele.xuelets.magicwork.v3.model.RE_GetSubCenterList);
     void autoOnSubjectsFail(android.app.Activity);
+    void forceUnlimitedNormalCount(java.lang.Object);
+    void forceCostSuccess(java.lang.Object);
     void ensureInit(android.app.Activity);
     java.lang.String cleanDeviceInfo(java.lang.String);
     void sanitizeHeaders(java.lang.Object);

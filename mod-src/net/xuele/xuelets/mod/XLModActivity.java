@@ -613,6 +613,29 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 "打完自动进挑战详情收集题目（接口版：题目 + 正确答案入库）",
                 XLModConfig.isAutoHarvestDetail(),
                 new View.OnClickListener() { public void onClick(View v) { XLModConfig.setAutoHarvestDetail(((MiuixSwitch) v).isChecked()); } });
+        // ---------- 普通挑战无限刷（V4.7p：客户端核实后的两个放行点） ----------
+        sectionLabel(cardAuto, "普通挑战无限刷（V4.7p）");
+        switchRow(cardAuto,
+                "普通挑战无限刷：跳过次数校验，答题照常得积分",
+                XLModConfig.isChallengeUnlimited(),
+                new View.OnClickListener() { public void onClick(View v) { XLModConfig.setChallengeUnlimited(((MiuixSwitch) v).isChecked()); } });
+        EditText etUnlimited = inputRow(cardAuto, "无限刷换科局数(0=不换)",
+                String.valueOf(XLModConfig.getUnlimitedSwitchAfter()), ++rowId);
+        final EditText fEtUnlimited = etUnlimited;
+        etUnlimited.addTextChangedListener(new SimpleWatcher() {
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                try {
+                    XLModConfig.setUnlimitedSwitchAfter(Integer.parseInt(fEtUnlimited.getText().toString().trim()));
+                } catch (Throwable t) {
+                }
+            }
+        });
+        tipGated(cardAuto, gChallenge, "**普通挑战无限刷（客户端核实结果）**：宿主的次数只是「开局时的一次服务端记账」——\n"
+                + "· 榜页：challengeSubjectTime(=normalTime) <= 0 就不让开局（客户端拦）；\n"
+                + "· 开局：competition/costChallengeCount 返回 functionCode==1 才算扣次成功，否则弹「次数已用完」退出（客户端拦）；\n"
+                + "· 答题/交卷（competition/submitChallenge）与积分结算**不看次数**；活动挑战路径更是**根本不调扣次接口**。\n"
+                + "打开本开关 = 上面两个客户端拦截点都放行 → 可以一直刷普通挑战拿积分（换科局数填 0 表示一直打当前学科）。");
         actionButton(cardAuto, "手动执行一次自动打榜（无视今日标记/时间）", true,
                 new View.OnClickListener() {
                     @Override

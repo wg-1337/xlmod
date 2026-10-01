@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.6p 全部新功能：
+"""验证 V4.7p 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.6p（唯一来源）
+   D1 XLModConfig.VERSION = v4.7p（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -328,8 +328,54 @@ ok(harvest_new('不会', False) is None, 'G5 V4.6p：没正确标记 → 不入�
 ok(harvest_new('不会', True) is None, 'G5 V4.6p：即使是"正确项"，「不会」这类垃圾也拒绝入库')
 ok(harvest_new('光合作用', True) == '光合作用', 'G5 V4.6p：真正的标准答案照常入库')
 
+print("H. 普通挑战无限刷 + 听力回填加固（V4.7p）")
+ok('isChallengeUnlimited' in C and 'challenge_unlimited' in C and 'unlimited_switch_after' in C,
+   'H1 新增开关「普通挑战无限刷」+ 换科局数')
+ok('forceUnlimitedNormalCount' in H and 'forceCostSuccess' in H,
+   'H1 两个客户端拦截点的放行函数（榜页次数 / 服务端扣次）都在')
+ok('mHelper' in H and 'challengeSubjectTime' in H and 'f.setInt(selector, 999)' in H,
+   'H1 榜页：把 ChallengeRankSelectorHelper.challengeSubjectTime 顶成 999（次数<=0 也开局）')
+ok('functionCode' in H and 'f.setInt(reCost, 1)' in H,
+   'H1 开局：把 RE_CostChallengeCount.functionCode 改成 1（服务端说用完也当成功）')
+ok('effectiveCap()' in H and 'initialPhaseNormal()' in H and 'isChallengeUnlimited()' in H,
+   'H1 引擎：无限刷时上限=MAX（0 局换科=不换）、阶段固定为普通挑战')
+ok('getUnlimitedSwitchAfter' in C and '无限刷换科局数' in A and '普通挑战无限刷' in A,
+   'H1 面板开关 + 说明（含客户端核实结论）')
+ok('forceCostSuccess' in io.open('obf-rules.pro', encoding='utf-8').read()
+   and 'forceUnlimitedNormalCount' in io.open('obf-rules.pro', encoding='utf-8').read(),
+   'H1 obf-rules.pro 已加 keep（smali 反射调用这两个方法，改名就静默失效）')
+ok('currentFragmentIsListen' in H and 'currentFragment(' in H,
+   'H2 听力判定双保险：qType==52 **或** 当前 Fragment 就是听力页（类名含 Listen / 有输入框）')
+ok('int[] tries' in H and 'tries[0] < 12' in H and 'postDelayed(fill[0], 1000)' in H,
+   'H2 听力回填改成"每秒重试、最多 12 次"，不再依赖某一次恰好赶上详情返回')
+ok('listenDiag' in H and '暂无可填答案' in H,
+   'H2 拿不到答案时打一行诊断（kb/详情缓存/题库/题型/选项）便于排障')
+ok('anyTextOf' in B and 'XLModBank.anyTextOf(qid)' in H,
+   'H2 题库兜底：不管旧条目记成哪种题型，只要有文本答案就取出来用')
+ok('applyListenAnswer(Activity act' in H and 'boolean applyListenAnswer' in H,
+   'H2 回填返回是否成功（重试循环据此决定继续/停止）')
+
+print("H3 无限刷算法镜像（客户端核实结论）")
+
+
+def can_start(count, unlimited):
+    """榜页拦截：challengeSubjectTime <= 0 直接不开局（客户端）"""
+    return count > 0 or unlimited
+
+
+def cost_ok(function_code, unlimited):
+    """开局拦截：service functionCode==1 才算扣次成功（客户端）"""
+    return function_code == 1 or unlimited
+
+
+ok(can_start(0, False) is False, 'H3 次数=0 且未开无限刷 → 打不开（客户端拦住）')
+ok(can_start(0, True) is True, 'H3 次数=0 + 无限刷 → 放行')
+ok(cost_ok(0, False) is False, 'H3 服务端返回 functionCode=0 且未开无限刷 → 弹「次数已用完」退出')
+ok(cost_ok(0, True) is True, 'H3 服务端返回 functionCode=0 + 无限刷 → 当作成功，继续答题')
+ok(cost_ok(1, False) is True, 'H3 服务端正常扣次成功 → 照常（不受开关影响）')
+
 print("D. 版本与产物")
-ok('VERSION = "v4.6p"' in C, 'D1 XLModConfig.VERSION = v4.6p')
+ok('VERSION = "v4.7p"' in C, 'D1 XLModConfig.VERSION = v4.7p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -358,9 +404,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.6p'), 'D2 APK 内含版本号 v4.6p（密文解回原文）')
+    ok(has('v4.7p'), 'D2 APK 内含版本号 v4.7p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
@@ -373,8 +419,8 @@ ok('sAutoPhaseNormal ? 1 : 2' in H and 'onFabMenuItemClick(fabId)' in H,
    'E1 FAB 按阶段点：普通挑战=1 / 同学对战=2')
 ok('phaseName()' in H and 'kindName()' in H, 'E1 日志区分阶段与"打什么"（排障可读）')
 ok('同学对战次数已用完，转普通挑战' in H, 'E1 对战次数用完 → 转普通挑战（而不是直接放弃本科）')
-ok('sAutoPhaseNormal = (XLModConfig.getChallengeKind() == 1)' in H,
-   'E1 每日重置/手动触发/换学科时都按 kind 复位阶段')
+ok('sAutoPhaseNormal = initialPhaseNormal()' in H and 'initialPhaseNormal' in H,
+   'E1 每日重置/手动触发/换学科时都按 kind 复位阶段（V4.7p：无限刷时固定为普通挑战）')
 ok('自动打什么（V4.4p）' in A and '同学对战 + 普通挑战（先对战再普通）' in A, 'E1 面板可选「自动打什么」')
 
 ok('applyBlindFallback' in H and '盲答' in H, 'E2 盲答兜底函数存在')

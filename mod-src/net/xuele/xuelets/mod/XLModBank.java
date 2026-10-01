@@ -363,6 +363,34 @@ public final class XLModBank {
         }
     }
 
+    /**
+     * V4.7p：不管条目记的是哪种题型，只要里面有文本答案就取出来
+     * （旧版本可能把听力答案记成 51 型，导致按类型查不到）。
+     */
+    public static String anyTextOf(String qid) {
+        try {
+            if (!enabled() || qid == null || qid.trim().isEmpty()) return "";
+            JSONObject e = sById.get(qid.trim());
+            if (e == null) return "";
+            String l = e.optString("l", "");
+            if (!isJunk(l)) return l.trim();
+            JSONArray f = e.optJSONArray("f");
+            if (f != null && f.length() > 0) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < f.length(); i++) {
+                    String s = f.optString(i, "");
+                    if (isJunk(s)) return "";
+                    if (i > 0) sb.append(" ");
+                    sb.append(s.trim());
+                }
+                return sb.toString();
+            }
+            return "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     private static JSONObject find(String qid, M_ChallengeQuestion q) {
         load();
         if (qid != null && !qid.trim().isEmpty()) {
