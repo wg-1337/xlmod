@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.9p 全部新功能：
+"""验证 V4.9q 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.9p（唯一来源）
+   D1 XLModConfig.VERSION = v4.9q（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -331,16 +331,17 @@ ok(harvest_new('光合作用', True) == '光合作用', 'G5 V4.6p：真正的标
 print("H. 普通挑战无限刷 + 听力回填加固（V4.7p）")
 ok('isChallengeUnlimited' in C and 'challenge_unlimited' in C and 'unlimited_switch_after' in C,
    'H1 新增开关「普通挑战无限刷」+ 换科局数')
-ok('forceUnlimitedNormalCount' in H and 'forceCostSuccess' in H,
-   'H1 两个客户端拦截点的放行函数（榜页次数 / 服务端扣次）都在')
-ok('mHelper' in H and 'challengeSubjectTime' in H and 'f.setInt(selector, 999)' in H,
-   'H1 榜页：把 ChallengeRankSelectorHelper.challengeSubjectTime 顶成 999（次数<=0 也开局）')
-ok('functionCode' in H and 'f.setInt(reCost, 1)' in H,
-   'H1 开局：把 RE_CostChallengeCount.functionCode 改成 1（服务端说用完也当成功）')
-ok('effectiveCap()' in H and 'initialPhaseNormal()' in H and 'isChallengeUnlimited()' in H,
-   'H1 引擎：无限刷时上限=MAX（0 局换科=不换）、阶段固定为普通挑战')
-ok('getUnlimitedSwitchAfter' in C and '每学科打几局(0=不限)' in A and '普通挑战无限刷' in A,
-   'H1 面板开关 + 说明（含客户端核实结论）')
+ok('forceUnlimitedNormalCount' in H and 'forceCostSuccess' in H
+   and '该功能已在 V4.9q 撤下' in H,
+   'H1 两个 smali 注入点保留为无害空转（不再放行次数）')
+ok('f.setInt(selector, 999)' not in H and 'f.setInt(reCost, 1)' not in H,
+   'H1 已删除"顶次数/改 functionCode"的放行代码（不会再干扰次数判定）')
+ok('return false;' in C and 'isChallengeUnlimited' in C and 'migrateRemoveUnlimited' in C,
+   'H1 配置层：isChallengeUnlimited() 恒 false + 一次性复位老设置（migrateRemoveUnlimited）')
+ok('return XLModConfig.getBattlesPerSubject();' in H and 'effectiveCap()' in H,
+   'H1 引擎：上限回归「每学科次数」（getBattlesPerSubject），不再被无限刷改写')
+ok('每学科打几局' not in A and '普通挑战无限刷：跳过次数校验' not in A,
+   'H1 面板已撤下「普通挑战无限刷」开关与「每学科打几局」（V4.9q）')
 ok('forceCostSuccess' in io.open('obf-rules.pro', encoding='utf-8').read()
    and 'forceUnlimitedNormalCount' in io.open('obf-rules.pro', encoding='utf-8').read(),
    'H1 obf-rules.pro 已加 keep（smali 反射调用这两个方法，改名就静默失效）')
@@ -414,12 +415,12 @@ ok('applyLocalTotalQuestions(act);' in H and 'sAutoQuestionsThisBattle++;' in H,
    'J1 每题显示时都校准一次本地最大题数（宿主拿到新题可能重写）')
 ok('宿主按这个数判定「最后一题」并提交，qTotal=' in H,
    'J1 日志说明：本地最大题数 X → N（宿主按这个数判定最后一题并提交，qTotal=N）')
-ok('if (perSubject > 0) return perSubject;' in H and 'capText()' in H,
-   'J2 每学科打几局(>0) 优先于「无限刷/每学科次数」—— 填 1 就只打一局')
-ok('isChallengeUnlimited()) return Integer.MAX_VALUE' in H,
-   'J2 该值为 0 时：开无限刷=不限，没开=用每学科次数')
-ok('每学科打几局(0=不限)' in A and '只有一个学科时会打一局就停' in A,
-   'J2 面板文案改成「每学科打几局(0=不限)」并写明只有一个学科时会停')
+ok('perSubject' not in H and 'Integer.MAX_VALUE' not in H,
+   'J2 每学科打几局/无限上限的代码已移除（不会再覆盖每学科次数）')
+ok('getUnlimitedSwitchAfter' in C and 'return 0;' in C,
+   'J2 配置层 getUnlimitedSwitchAfter() 恒返回 0（旧值读取不再生效）')
+ok('打几局/换科' in A and '由「每学科次数」' in A,
+   'J2 面板说明写明：打几局/换科沿用原逻辑（每学科次数），不再有无限刷干扰')
 ok('本学科已打 ' in H and '全部完成，标记今日完成并停止' in H,
    'J2 每次判定都打日志说明「打成几局/共几个学科/为什么停」')
 
@@ -436,7 +437,7 @@ ok(settles(20, 18) is False, 'J3 第 19 题还没到 → 继续答')
 ok(settles(3, 2) is True, 'J3 本地总题数=3 → 第 3 题结算')
 
 print("D. 版本与产物")
-ok('VERSION = "v4.9p"' in C, 'D1 XLModConfig.VERSION = v4.9p')
+ok('VERSION = "v4.9q"' in C, 'D1 XLModConfig.VERSION = v4.9q')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -465,9 +466,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算', u'已到服务端最后一题', u'本地最大题数', u'已撤下'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.9p'), 'D2 APK 内含版本号 v4.9p（密文解回原文）')
+    ok(has('v4.9q'), 'D2 APK 内含版本号 v4.9q（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 

@@ -613,25 +613,8 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 "打完自动进挑战详情收集题目（接口版：题目 + 正确答案入库）",
                 XLModConfig.isAutoHarvestDetail(),
                 new View.OnClickListener() { public void onClick(View v) { XLModConfig.setAutoHarvestDetail(((MiuixSwitch) v).isChecked()); } });
-        // ---------- 普通挑战无限刷（V4.7p：客户端核实后的两个放行点） ----------
-        sectionLabel(cardAuto, "普通挑战无限刷（V4.7p）");
-        switchRow(cardAuto,
-                "普通挑战无限刷：跳过次数校验，答题照常得积分",
-                XLModConfig.isChallengeUnlimited(),
-                new View.OnClickListener() { public void onClick(View v) { XLModConfig.setChallengeUnlimited(((MiuixSwitch) v).isChecked()); } });
-        EditText etUnlimited = inputRow(cardAuto, "每学科打几局(0=不限)",
-                String.valueOf(XLModConfig.getUnlimitedSwitchAfter()), ++rowId);
-        final EditText fEtUnlimited = etUnlimited;
-        etUnlimited.addTextChangedListener(new SimpleWatcher() {
-            @Override
-            public void afterTextChanged(android.text.Editable s) {
-                try {
-                    XLModConfig.setUnlimitedSwitchAfter(Integer.parseInt(fEtUnlimited.getText().toString().trim()));
-                } catch (Throwable t) {
-                }
-            }
-        });
         // ---------- 自定义每局题数 + 提前结算（V4.8p） ----------
+        // 注：V4.9q 已按用户要求撤下会与自动换科/次数判定打架的那两个控件
         EditText etQCount = inputRow(cardAuto, "每局题数(0=服务端默认)",
                 String.valueOf(XLModConfig.getNormalQCount()), ++rowId);
         final EditText fEtQCount = etQCount;
@@ -651,14 +634,9 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
         tipGated(cardAuto, gChallenge, "**每局题数**：0 = 不干预；填 N = **直接把宿主的「本地最大题数」改成 N** —— "
                 + "宿主会把第 N 题当成最后一题（进度条、最后一题视图、提交时带的 qTotal 全是 N），"
                 + "答完第 N 题就按宿主自己的正常流程提交结算（服务端认的就是这个 qTotal）。\n"
-                + "**每学科打几局(0=不限)**：填 1 = 每个学科只打一局就换下一个学科（只有一个学科时会打一局就停）；"
-                + "填 0 = 不限（开了「普通挑战无限刷」就一直打，没开则用「每学科次数」）。\n"
+                + "**打几局/换科**：沿用原逻辑 —— 由「每学科次数」（服务端规则 1~3）决定，打满就换下一个学科，"
+                + "全部学科打完就标记今日完成并停止（V4.9q 起已撤下会与之打架的那两个控件）。\n"
                 + "**提前结算方式**：正常提交(qStatus=1) 与宿主点「提交成绩」一致；服务端若有意见就换「放弃提交(qStatus=3)」。");
-        tipGated(cardAuto, gChallenge, "**普通挑战无限刷（客户端核实结果）**：宿主的次数只是「开局时的一次服务端记账」——\n"
-                + "· 榜页：challengeSubjectTime(=normalTime) <= 0 就不让开局（客户端拦）；\n"
-                + "· 开局：competition/costChallengeCount 返回 functionCode==1 才算扣次成功，否则弹「次数已用完」退出（客户端拦）；\n"
-                + "· 答题/交卷（competition/submitChallenge）与积分结算**不看次数**；活动挑战路径更是**根本不调扣次接口**。\n"
-                + "打开本开关 = 上面两个客户端拦截点都放行 → 可以一直刷普通挑战拿积分（换科局数填 0 表示一直打当前学科）。");
         actionButton(cardAuto, "手动执行一次自动打榜（无视今日标记/时间）", true,
                 new View.OnClickListener() {
                     @Override

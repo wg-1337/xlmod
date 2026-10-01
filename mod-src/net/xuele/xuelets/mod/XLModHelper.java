@@ -3577,40 +3577,29 @@ public class XLModHelper {
     }
 
     /**
-     * V4.9p：本学科"打几局"的上限。
-     *
-     * <p>规则（把两个旋钮说清楚，别再互相打架）：</p>
-     * <ul>
-     *   <li><b>每学科打几局(0=不限)</b>（{@code unlimited_switch_after}）>0 → 以它为准（不管有没有开无限刷）；</li>
-     *   <li>它 = 0 时：开了无限刷 → 不限（一直打）；没开 → 用「每学科次数」（服务端规则 1..3）。</li>
-     * </ul>
+     * V4.9q：本学科"打几局"的上限 —— **回归宿主规则**：用「每学科次数」（服务端 1~3）。
+     * （V4.7p 的「普通挑战无限刷」与「每学科打几局」已按你的要求撤掉：它们和自动换科/次数判定打架。）
      */
     private static int effectiveCap() {
         try {
-            int perSubject = XLModConfig.getUnlimitedSwitchAfter();
-            if (perSubject > 0) return perSubject;                 // 明确了"打几局"
-            if (XLModConfig.isChallengeUnlimited()) return Integer.MAX_VALUE;
             return XLModConfig.getBattlesPerSubject();
         } catch (Throwable t) {
-            return XLModConfig.getBattlesPerSubject();
+            return 3;
         }
     }
 
-    /** 上限是否"不限"（日志文案用） */
+    /** 上限文案（日志用） */
     private static String capText() {
-        int c = effectiveCap();
-        return c == Integer.MAX_VALUE ? "不限" : String.valueOf(c);
+        return String.valueOf(effectiveCap());
     }
 
-    /** 是否需要从"同学对战"转到"普通挑战"（kind=2 且本学科对战已打满；无限刷时不回转） */
+    /** 是否需要从"同学对战"转到"普通挑战"（kind=2 且本学科对战已打满） */
     private static boolean needSwitchToNormal() {
-        if (XLModConfig.isChallengeUnlimited()) return false;
         return XLModConfig.getChallengeKind() == 2 && !sAutoPhaseNormal;
     }
 
-    /** V4.7p：无限刷时始终打"普通挑战"（积分来源） */
+    /** 起始阶段：只打普通挑战时直接从普通挑战开始 */
     private static boolean initialPhaseNormal() {
-        if (XLModConfig.isChallengeUnlimited()) return true;
         return XLModConfig.getChallengeKind() == 1;
     }
 
@@ -3822,55 +3811,25 @@ public class XLModHelper {
         return sb.toString();
     }
 
-    // ================= 普通挑战无限刷（V4.7p，客户端核实后的两个放行点） =================
-    private static boolean sUnlimitedLogged = false;
-
-    /**
-     * 挂点：{@code ChallengeParamHelper$3.callback()} 顶部（榜页点「普通挑战」后的次数校验回调）。
-     * 服务端 normalTime 为 0 时宿主直接提示"每天每个科目最多可挑战 N 次"而不开局；
-     * 打开「普通挑战无限刷」就把次数顶上去，让开局继续。
-     */
+    // ================= 普通挑战无限刷（V4.7p 引入 / V4.9q 撤下） =================
+    // 说明：这两个方法是给 smali 注入点用的（ChallengeParamHelper$3.callback / ChallengeQuestionBaseActivity$5.onReqSuccess）。
+    // V4.9q 按用户要求撤掉「普通挑战无限刷」功能后，它们变成**空转**（配置恒为 false），
+    // 保留方法只为不动 smali（避免再次 apktool 全量重打包）。
+    /** 空转：不再放行榜页次数 */
     public static void forceUnlimitedNormalCount(Object callback) {
         try {
-            if (!XLModConfig.isChallengeUnlimited()) return;
-            if (callback == null) return;
-            Object helper = getFieldValue(callback, "this$0");       // ChallengeParamHelper
-            Object selector = getFieldValue(helper, "mHelper");      // ChallengeRankSelectorHelper
-            if (selector == null) return;
-            java.lang.reflect.Field f = findField(selector.getClass(), "challengeSubjectTime");
-            if (f == null) return;
-            f.setAccessible(true);
-            Object cur = f.get(selector);
-            int now = (cur instanceof Integer) ? (Integer) cur : 0;
-            if (now <= 0) {
-                f.setInt(selector, 999);
-                trace("[无限刷] 榜页次数=" + now + " → 999（放行普通挑战）");
-            }
-        } catch (Throwable t) {
-            trace("[无限刷] 次数放行异常: " + t);
+            if (!XLModConfig.isChallengeUnlimited()) return;      // 已撤下 → 恒为 false
+            trace("[无限刷] 该功能已在 V4.9q 撤下，本条不会生效");
+        } catch (Throwable ignored) {
         }
     }
 
-    /**
-     * 挂点：{@code ChallengeQuestionBaseActivity$5.onReqSuccess(RE_CostChallengeCount)} 顶部。
-     * 服务端返回"次数已用完"（functionCode != 1）时，宿主会弹窗并退出；打开无限刷就把它改成成功，
-     * 于是答题界面正常打开、答题与积分照常（服务端并不在此处拦截）。
-     */
+    /** 空转：不再把服务端"次数用完"改成成功 */
     public static void forceCostSuccess(Object reCost) {
         try {
-            if (!XLModConfig.isChallengeUnlimited()) return;
-            if (reCost == null) return;
-            java.lang.reflect.Field f = findField(reCost.getClass(), "functionCode");
-            if (f == null) return;
-            f.setAccessible(true);
-            Object cur = f.get(reCost);
-            int now = (cur instanceof Integer) ? (Integer) cur : 0;
-            if (now != 1) {
-                f.setInt(reCost, 1);
-                trace("[无限刷] 服务端扣次返回 " + now + " → 当作成功（次数不拦答题）");
-            }
-        } catch (Throwable t) {
-            trace("[无限刷] 扣次放行异常: " + t);
+            if (!XLModConfig.isChallengeUnlimited()) return;      // 已撤下 → 恒为 false
+            trace("[无限刷] 该功能已在 V4.9q 撤下，本条不会生效");
+        } catch (Throwable ignored) {
         }
     }
 
@@ -4050,7 +4009,7 @@ public class XLModHelper {
                         XLModConfig.markChallengeDone(lm.getUserId());
                     } catch (Throwable t) {
                     }
-                    trace("[打榜] 本学科打满且已是最后一个学科 → 全部完成，标记今日完成并停止（想继续刷就开「普通挑战无限刷」或把「每学科打几局」调大）");
+                    trace("[打榜] 本学科打满且已是最后一个学科 → 全部完成，标记今日完成并停止");
                     android.os.Handler h2 = new android.os.Handler(android.os.Looper.getMainLooper());
                     h2.postDelayed(new Runnable() {
                         @Override

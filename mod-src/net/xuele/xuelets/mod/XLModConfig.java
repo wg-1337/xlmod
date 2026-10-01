@@ -143,6 +143,11 @@ public class XLModConfig {
             kbPurgeJunk();
         } catch (Throwable ignored) {
         }
+        // V4.9q：撤下「普通挑战无限刷/每学科打几局」→ 把老配置复位（否则残留会一直打同一科）
+        try {
+            migrateRemoveUnlimited();
+        } catch (Throwable ignored) {
+        }
         if (context != null && sAppCtx == null) {
             try {
                 sAppCtx = context.getApplicationContext();
@@ -667,7 +672,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.9p";
+    public static final String VERSION = "v4.9q";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -883,36 +888,39 @@ public class XLModConfig {
         wb("auto_harvest_detail", v);
     }
 
-    // ============ 普通挑战无限刷（V4.7p） ============
+    // ============ 普通挑战无限刷（V4.7p 引入 / **V4.9q 已撤下**） ============
     /**
-     * 客户端核实结论（V4.7p）：
-     * <pre>
-     * ChallengeQuestionBaseActivity.initQuestion():
-     *   if (isActivityChallenge()) mHasConsumeCount = true;                 // 活动挑战：视为已扣次
-     *   if (isActivityChallenge() || !LoginManager.isStudent())
-     *        loadingSuccess(...);                                          // ← 根本不调 costChallengeCount
-     *   else consumeTicket();                                              // ← 学生普通挑战才调服务端扣次
-     * </pre>
-     * 也就是说"次数"只是**开局时的一次服务端记账**（competition/costChallengeCount，返回 functionCode==1 才算成功），
-     * 客户端用 `challengeSubjectTime(=normalTime) <= 0` 拦住入口、用 `isCostSuccess()` 拦住开局；
-     * 答题/交卷（competition/submitChallenge）与积分结算**不看次数**。
-     * 打开本开关即：① 榜页次数<=0 也放行；② 服务端说"次数用完"也当作成功继续开局 → 可以无限刷普通挑战。
+     * 该功能与"每学科次数 / 自动换科"的判定互相打架（用户实测：只勾一个学科、只想打一次却一直打），
+     * 已按用户要求**从面板与引擎里去掉**。这里恒返回 false（保留方法只为不动 smali 注入点与旧配置）。
      */
     public static boolean isChallengeUnlimited() {
-        return b("challenge_unlimited", false);
+        return false;
     }
 
-    public static void setChallengeUnlimited(boolean v) {
-        wb("challenge_unlimited", v);
-    }
-
-    /** 无限刷时"打满多少局就换下一科"仍沿用每学科次数；0 表示一直打当前学科 */
+    /** 已撤下；保留只为兼容旧配置读取 */
     public static int getUnlimitedSwitchAfter() {
-        return i("unlimited_switch_after", 0);
+        return 0;
     }
 
     public static void setUnlimitedSwitchAfter(int v) {
-        wi("unlimited_switch_after", v < 0 ? 0 : (v > 200 ? 200 : v));
+        wi("unlimited_switch_after", 0);
+    }
+
+    /** V4.9q 一次性迁移：把老版本开过的无限刷/换科局数强制复位，避免残留配置继续生效 */
+    public static void migrateRemoveUnlimited() {
+        try {
+            if (b("unlimited_removed_v49q", false)) return;
+            wb("unlimited_removed_v49q", true);
+            boolean was = b("challenge_unlimited", false);
+            int rounds = i("unlimited_switch_after", 0);
+            wb("challenge_unlimited", false);
+            wi("unlimited_switch_after", 0);
+            if (was || rounds > 0) {
+                logAppend("[打榜] 已撤下「普通挑战无限刷/每学科打几局」并把本机设置复位（无限刷=" + was
+                        + "，每学科局数=" + rounds + "）");
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     // ============ 自定义每局题数 + 提前结算（V4.8p） ============
