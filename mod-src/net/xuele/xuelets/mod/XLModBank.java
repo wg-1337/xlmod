@@ -40,6 +40,11 @@ public final class XLModBank {
     /** 题库条目上限（超出后按时间淘汰最旧的） */
     private static final int MAX_ITEMS = 2000;
 
+    // 题型 id（**以宿主的映射为准**：3=填空、51=口语(录音，无输入框)、52=听力/听写(有输入框)）
+    private static final int QT_FILL = 3;
+    private static final int QT_SPOKEN = 51;
+    private static final int QT_LISTEN = 52;
+
     private static final ConcurrentHashMap<String, JSONObject> sById = new ConcurrentHashMap<String, JSONObject>();
     private static final ConcurrentHashMap<String, String> sSig2Id = new ConcurrentHashMap<String, String>();
 
@@ -121,12 +126,12 @@ public final class XLModBank {
                     opts.put(o);
                     boolean correct = a.isCorrect != null && "1".equals(a.isCorrect.trim());
                     if (correct) right.put(i);
-                    if (type == 3 && correct && a.answerContent != null && !a.answerContent.trim().isEmpty()) {
+                    if (type == QT_FILL && correct && a.answerContent != null && !a.answerContent.trim().isEmpty()) {
                         fill.put(a.answerContent);      // 有正确标记的填空：只收标记过的空
                     }
                 }
             }
-            if (type == 3 || type == 52) {
+            if (type == QT_FILL) {
                 if (fill.length() == 0) {
                     // 没有正确标记时：同学对战/详情数据里的 answerContent 就是标准答案文本，按空位顺序收
                     if (ans != null) {
@@ -139,7 +144,8 @@ public final class XLModBank {
                 }
                 if (fill.length() == 0) return false;
                 e.put("f", fill);
-            } else if (type == 51) {
+            } else if (type == QT_LISTEN) {
+                // 听力/听写（52，有输入框）：答案文本放在 l（详情接口/答案文本更可靠）
                 if (fill.length() == 0 && ans != null) {
                     for (AnswersBean a : ans) {
                         if (a != null && a.answerContent != null && !a.answerContent.trim().isEmpty()) {
@@ -148,8 +154,10 @@ public final class XLModBank {
                         }
                     }
                 }
-                if (fill.length() == 0) return false;     // 听力答案一般只能等详情接口
+                if (fill.length() == 0) return false;     // 听力答案一般只能等详情接口（putListen）
                 e.put("l", fill.optString(0, ""));
+            } else if (type == QT_SPOKEN) {
+                return false;                             // 口语（51）是录音题：没有可填的文本答案
             } else {
                 if (right.length() == 0) return false;    // 没有正确标记的题目不入库（避免污染）
                 e.put("k", right);
@@ -164,7 +172,7 @@ public final class XLModBank {
         }
     }
 
-    /** 听写题(51)标准答案（详情接口 sContent）入库 */
+    /** 听力/听写题(52)标准答案（详情接口 sContent / 答案文本）入库 */
     public static void putListen(String qid, String text) {
         try {
             if (!enabled() || qid == null || qid.trim().isEmpty()) return;
@@ -173,7 +181,7 @@ public final class XLModBank {
             if (e == null) {
                 e = new JSONObject();
                 e.put("id", qid.trim());
-                e.put("t", 51);
+                e.put("t", QT_LISTEN);
                 e.put("c", "");
                 e.put("src", "detail");
             }
@@ -245,7 +253,7 @@ public final class XLModBank {
             JSONObject e = find(qid, q);
             if (e == null) return false;
             int type = e.optInt("t", 0);
-            if (type == 3 || type == 52) {
+            if (type == QT_FILL) {
                 JSONArray f = e.optJSONArray("f");
                 if (f == null || f.length() == 0) return false;
                 ua.answerIdList.clear();
@@ -253,14 +261,20 @@ public final class XLModBank {
                 for (int i = 0; i < f.length(); i++) ua.answerContentList.add(f.optString(i, ""));
                 return true;
             }
-            if (type == 51) {
+            if (type == QT_LISTEN) {
+                // 听力/听写（52）：标准答案文本（l 优先，其次 f）
                 String l = e.optString("l", "");
+                if (l.isEmpty()) {
+                    JSONArray f = e.optJSONArray("f");
+                    if (f != null && f.length() > 0) l = f.optString(0, "");
+                }
                 if (l.isEmpty()) return false;
                 ua.answerIdList.clear();
                 ua.answerContentList.clear();
                 ua.answerContentList.add(l);
                 return true;
             }
+            if (type == QT_SPOKEN) return false;      // 口语（51）：录音题，无法用文本作答
             JSONArray opts = e.optJSONArray("opts");
             JSONArray k = e.optJSONArray("k");
             if (opts == null || k == null || k.length() == 0) return false;
@@ -295,6 +309,22 @@ public final class XLModBank {
             sLastError = String.valueOf(t);
         }
         return false;
+    }
+
+    /** 题库状态读取失败兜底 */
+    public static String listenTextOf(String qid) {
+        try {
+            if (!enabled() || qid == null || qid.trim().isEmpty()) return "";
+            JSONObject e = sById.get(qid.trim());
+            if (e == null) return "";
+            if (e.optInt("t", 0) != QT_LISTEN) return "";
+            String l = e.optString("l", "");
+            if (!l.isEmpty()) return l;
+            JSONArray f = e.optJSONArray("f");
+            return (f != null && f.length() > 0) ? f.optString(0, "") : "";
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     private static JSONObject find(String qid, M_ChallengeQuestion q) {

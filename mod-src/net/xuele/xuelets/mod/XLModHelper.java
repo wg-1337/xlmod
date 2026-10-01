@@ -4265,9 +4265,34 @@ public class XLModHelper {
                             try {
                                 if (list == null) return;
                                 int withAnswer = 0;
-                                for (M_ChallengeQuestion q : list) {
+                                int listenGot = 0;
+                                for (int qi = 0; qi < list.size(); qi++) {
+                                    M_ChallengeQuestion q = list.get(qi);
                                     if (q == null || q.questionId == null || q.questionId.isEmpty()) continue;
                                     sDetailMap.put(q.questionId, q);
+                                    // V4.4q：听力/听写(52) 的标准答案在详情答案映射里（sContent/answerContentList）
+                                    if (parseQType(q) == QT_LISTEN && map != null) {
+                                        try {
+                                            net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(qi);
+                                            String txt = "";
+                                            if (u != null) {
+                                                if (u.answerContentList != null && !u.answerContentList.isEmpty()
+                                                        && u.answerContentList.get(0) != null) {
+                                                    txt = String.valueOf(u.answerContentList.get(0));
+                                                }
+                                                if ((txt == null || txt.isEmpty()) && u.sContent != null) {
+                                                    txt = u.sContent;
+                                                }
+                                            }
+                                            if (txt != null && !txt.trim().isEmpty()) {
+                                                sDetailListenText.put(q.questionId, txt);
+                                                XLModConfig.kbPut(q.questionId, "L|" + txt);
+                                                XLModBank.putListen(q.questionId, txt);
+                                                listenGot++;
+                                            }
+                                        } catch (Throwable ignored) {
+                                        }
+                                    }
                                     // V4.3p/V4.4p：详情数据整题入库（含正确答案文本/填空文本）
                                     try {
                                         if (XLModBank.harvestQuestion(q, "detail")) withAnswer++;
@@ -4275,7 +4300,7 @@ public class XLModHelper {
                                     }
                                     java.util.List<AnswersBean> ans = q.answers;
                                     if (ans == null) continue;
-                                    if (parseQType(q) == 3) {
+                                    if (parseQType(q) == QT_FILL) {
                                         // 填空：逐空文本（详情接口若带 answerContent 才有效）
                                         boolean any = false;
                                         for (AnswersBean a : ans) {
@@ -4309,7 +4334,7 @@ public class XLModHelper {
                                 int now = XLModBank.size();
                                 trace("[题库] 挑战详情采集完成（" + fReason + "）：详情 "
                                         + (list == null ? 0 : list.size()) + " 题，其中带答案 " + withAnswer
-                                        + " 题；题库 " + before + " → " + now + " 题");
+                                        + " 题，听力文本 " + listenGot + " 条；题库 " + before + " → " + now + " 题");
                                 XLModBank.save(true);
                             } catch (Throwable t) {
                                 trace("[题库] 详情入库异常: " + t);
@@ -4392,7 +4417,7 @@ public class XLModHelper {
             int t = parseQType(q);
             List<AnswersBean> answers = q.answers;
             if (answers == null || answers.isEmpty()) return ua;
-            if (t == 3) { // 填空：按空位顺序填入正确答案文本
+            if (t == QT_FILL) { // 填空：按空位顺序填入正确答案文本
                 ua.answerContentList.clear();
                 for (AnswersBean a : answers) {
                     ua.answerContentList.add(a.answerContent == null ? "" : a.answerContent);
@@ -4417,6 +4442,11 @@ public class XLModHelper {
         return ua;
     }
 
+    // 题型 id（**以宿主的映射为准**：3=填空、2=判断、11=单选、12=多选、
+    // 51=口语(录音，布局 fragment_challenge_spoken，没有输入框)、52=听力/听写(布局 fragment_challenge_listen_question，有输入框))
+    private static final int QT_FILL = 3;
+    private static final int QT_LISTEN = 52;
+    private static final int QT_SPOKEN = 51;
     private static int parseQType(M_ChallengeQuestion q) {
         if (q == null || q.qType == null) return 0;
         try {
@@ -4482,7 +4512,7 @@ public class XLModHelper {
         try {
             String qid = q.questionId == null ? "" : q.questionId;
             // 0) 听力(51)：标准答案文本（详情 sContent / 知识库），需先填，生成判题模型时才能附带
-            if (parseQType(q) == 51) {
+            if (parseQType(q) == QT_LISTEN) {
                 String lt = listenAnswer(qid);
                 if (lt != null && !lt.isEmpty()) {
                     ua.answerContentList.clear();
@@ -4589,7 +4619,7 @@ public class XLModHelper {
                         + "（选项数 " + ans.size() + "）");
                 return;
             }
-            if (t == 3 || t == 51) {
+            if (t == QT_FILL || t == QT_LISTEN) {
                 String fill = XLModConfig.getBlindFillText();
                 int blanks = 1;
                 if (t == 3 && q.answers != null && !q.answers.isEmpty()) blanks = q.answers.size();
@@ -4623,15 +4653,17 @@ public class XLModHelper {
         }
     }
 
-    // ================= 听力(51)自动作答 =================
-    /** 取听力标准答案：知识库 > 详情缓存 */
+    // ================= 听力/听写(52)自动作答 =================
+    /** 取听力标准答案：知识库(L|) > 详情缓存 > 题库 */
     private static String listenAnswer(String qid) {
         try {
             if (qid == null || qid.isEmpty()) return "";
             String kb = XLModConfig.kbGet(qid);
             if (kb != null && kb.startsWith("L|")) return kb.substring(2);
             String t = sDetailListenText.get(qid);
-            return t == null ? "" : t;
+            if (t != null && !t.isEmpty()) return t;
+            String fromBank = XLModBank.listenTextOf(qid);      // V4.4q：题库里也存听力答案
+            return fromBank == null ? "" : fromBank;
         } catch (Throwable t) {
             return "";
         }
@@ -4641,8 +4673,8 @@ public class XLModHelper {
     private static void applyListenAnswer(Activity act, net.xuele.xuelets.challenge.util.ChallengeParamHelper ph,
                                           M_ChallengeQuestion q, int pos) {
         try {
-            if (!XLModConfig.isAutoAnswer()) return;
-            if (act == null || q == null || parseQType(q) != 51) return;
+            if (!(XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat())) return;
+            if (act == null || q == null || parseQType(q) != QT_LISTEN) return;
             String qid = q.questionId == null ? "" : q.questionId;
             if (qid.isEmpty()) return;
             String text = listenAnswer(qid);
@@ -4717,18 +4749,120 @@ public class XLModHelper {
         return false;
     }
 
-    /** 给某个题目 Fragment 的听力输入框写入文本（内容相同则不重复 set，避免打断用户输入） */
+    /** 给某个题目 Fragment 的听力输入框写入文本（V4.4q：多路径找输入框 + 写入后读回校验） */
     private static boolean setFragmentListenText(Object frag, String text) {
         if (frag == null || text == null || text.isEmpty()) return false;
         try {
-            Object et = getFieldValue(frag, "mEtAnswer");
+            android.widget.EditText et = findListenEditText(frag);
             if (et == null) return false;
-            Object cur = et.getClass().getMethod("getText").invoke(et);
-            if (cur != null && text.equals(cur.toString())) return true;
-            et.getClass().getMethod("setText", CharSequence.class).invoke(et, text);
-            return true;
+            return writeEditText(et, text);
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    /**
+     * 找听力输入框：① 字段 mEtAnswer ② Fragment 任意字段里的 EditText ③ 视图树扫描。
+     * （V4.4q：以前只认 mEtAnswer，换了题型/布局就"输入框未命中"）
+     */
+    private static android.widget.EditText findListenEditText(Object frag) {
+        try {
+            Object v = getFieldValue(frag, "mEtAnswer");
+            if (v instanceof android.widget.EditText) return (android.widget.EditText) v;
+            // 扫所有字段（含父类）
+            Class<?> c = frag.getClass();
+            while (c != null && c != Object.class) {
+                java.lang.reflect.Field[] fs = c.getDeclaredFields();
+                for (java.lang.reflect.Field f : fs) {
+                    try {
+                        f.setAccessible(true);
+                        Object o = f.get(frag);
+                        if (o instanceof android.widget.EditText) return (android.widget.EditText) o;
+                    } catch (Throwable ignored) {
+                    }
+                }
+                c = c.getSuperclass();
+            }
+            // 扫视图树
+            String[] viewFields = {"mChildRootView", "rootView", "mRootView", "mView"};
+            for (String vf : viewFields) {
+                Object view = getFieldValue(frag, vf);
+                if (view instanceof android.view.View) {
+                    android.widget.EditText e = findEditTextInView((android.view.View) view);
+                    if (e != null) return e;
+                }
+            }
+            try {
+                Object gv = frag.getClass().getMethod("getView").invoke(frag);
+                if (gv instanceof android.view.View) {
+                    return findEditTextInView((android.view.View) gv);
+                }
+            } catch (Throwable ignored) {
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static android.widget.EditText findEditTextInView(android.view.View v) {
+        try {
+            if (v instanceof android.widget.EditText) return (android.widget.EditText) v;
+            if (v instanceof android.view.ViewGroup) {
+                android.view.ViewGroup g = (android.view.ViewGroup) v;
+                for (int i = 0; i < g.getChildCount(); i++) {
+                    android.widget.EditText e = findEditTextInView(g.getChildAt(i));
+                    if (e != null) return e;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * 写入输入框并**读回校验**：
+     * 听力输入框是 NoEmojiEditText（布局里还带 {@code android:digits} 过滤），
+     * setText 可能被过滤器/监听器吃掉；这里逐级降级，直到读回来的就是答案。
+     */
+    private static boolean writeEditText(android.widget.EditText et, String text) {
+        try {
+            if (et == null || text == null || text.isEmpty()) return false;
+            if (text.equals(readEditText(et))) return true;
+            et.setText(text);
+            if (text.equals(readEditText(et))) return true;
+            // 被 InputFilter（android:digits）过滤 → 临时清掉过滤器再写
+            android.text.InputFilter[] old = et.getFilters();
+            et.setFilters(new android.text.InputFilter[0]);
+            et.setText(text);
+            boolean ok = text.equals(readEditText(et));
+            if (!ok) {
+                // 再退一步：直接改 Editable（绕过 setText 的过滤器路径）
+                android.text.Editable ed = et.getText();
+                if (ed != null) {
+                    ed.clear();
+                    ed.append(text);
+                }
+                ok = text.equals(readEditText(et));
+            }
+            if (ok && old != null && old.length > 0) {
+                et.setFilters(old);                 // 还原过滤器；读回不一致就以"填进去"为准
+                if (!text.equals(readEditText(et))) {
+                    et.setFilters(new android.text.InputFilter[0]);
+                    et.setText(text);
+                }
+            }
+            return ok;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String readEditText(android.widget.EditText et) {
+        try {
+            android.text.Editable e = et.getText();
+            return e == null ? "" : e.toString();
+        } catch (Throwable t) {
+            return "";
         }
     }
 
@@ -4758,13 +4892,19 @@ public class XLModHelper {
 
     /**
      * 听力题"提交前回填"（由 smali 注入在 ChallengeListenQuestionFragment.checkUserAnswered 顶部调用）。
-     * 提交时 App 是拿输入框内容重建 answerContentList 的：答案取到了但没写进输入框 = 判定未作答，
+     * 提交时 App 是拿输入框内容重建 answerContentList 的（{@code checkUserAnswered} 里
+     * {@code mEtAnswer.getText()} 直接覆盖 ua）：「取到答案但没写进输入框」= 判定未作答。
      * 这条注入保证"无论详情接口什么时候回来"，提交那一刻输入框里一定有答案。
+     *
+     * <p>V4.4q 修复：① 题型 id 按宿主映射（**52=听力**，51=口语）；② 不再要求开「自动作答」
+     * （开着答案悬浮窗也会回填）；③ 输入框多路径查找 + 写入读回校验，并把结果写进日志。</p>
      */
     public static void listenFillAnswer(Object fragment) {
         try {
             if (fragment == null) return;
-            if (!XLModConfig.isAutoAnswer()) return;
+            if (!(XLModConfig.isAutoAnswer() || XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat())) {
+                return;
+            }
             Object ua = getFieldValue(fragment, "mUserAnswer");
             String text = "";
             java.util.List list = null;
@@ -4786,14 +4926,29 @@ public class XLModHelper {
                 if (qidO != null) qid = String.valueOf(qidO);
             }
             if (text.isEmpty() && !qid.isEmpty()) text = listenAnswer(qid);
-            if (text == null || text.isEmpty()) return;
+            if (text == null || text.isEmpty()) {
+                XLModConfig.logAppend("[听力] 提交前回填：还没有答案（" + qid + "），本空先交给盲填");
+                return;
+            }
             if (list != null && (list.isEmpty() || !text.equals(String.valueOf(list.get(0))))) {
                 list.clear();
                 list.add(text);
             }
             boolean ok = setFragmentListenText(fragment, text);
-            XLModConfig.logAppend("[听力] 提交前回填: " + qid + " → " + text + (ok ? "" : "（输入框未命中）"));
+            XLModConfig.logAppend("[听力] 提交前回填: " + qid + " → " + text
+                    + (ok ? "（输入框已写入 " + readListenBox(fragment) + "）" : "（输入框未命中！）"));
         } catch (Throwable t) {
+            XLModConfig.logAppend("[听力] 提交前回填异常: " + t);
+        }
+    }
+
+    /** 诊断用：读回当前输入框内容 */
+    private static String readListenBox(Object fragment) {
+        try {
+            android.widget.EditText et = findListenEditText(fragment);
+            return et == null ? "(无输入框)" : readEditText(et);
+        } catch (Throwable t) {
+            return "(读取失败)";
         }
     }
 
@@ -4854,7 +5009,7 @@ public class XLModHelper {
                             if (ph.mHelper != null) sFloatMonthSubject = ph.mHelper.getCurMonthSubject();
                         } catch (Throwable t) {
                         }
-                        if (parseQType(q0) == 51) {
+                        if (parseQType(q0) == QT_LISTEN) {
                             applyListenAnswer(act, ph, q0, pos);
                             fetchByDetail(act); // 结果 → sDetailListenText → 回来后 applyListenAnswerCurrent 回填输入框
                             final Activity fAct0 = act;
@@ -4901,7 +5056,7 @@ public class XLModHelper {
             // 详情拉取已提前到悬浮窗开关判断之前（见方法开头），这里只做"应用 + 延迟再应用"
             sFloatPH = ph;
             sFloatPos = pos;
-            if (parseQType(q) == 51 && XLModConfig.isAutoAnswer()) {
+            if (parseQType(q) == QT_LISTEN && XLModConfig.isAutoAnswer()) {
                 applyListenAnswer(act, ph, q, pos);
                 final Activity fAct = act;
                 final net.xuele.xuelets.challenge.util.ChallengeParamHelper fPh = ph;
@@ -5139,7 +5294,7 @@ public class XLModHelper {
                                     if (q == null || q.questionId == null) continue;
                                     sDetailMap.put(q.questionId, q);
                                     // 听写题：官方详情把标准答案放在 sContent（initAnswer → answerContentList）
-                                    if (parseQType(q) == 51 && map != null) {
+                                    if (parseQType(q) == QT_LISTEN && map != null) {
                                         net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(i);
                                         if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
                                             String txt = u.answerContentList.get(0);

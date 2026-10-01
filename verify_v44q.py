@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.4p 全部新功能：
+"""验证 V4.4q 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -25,8 +25,14 @@ E 普通挑战自动打 + 盲答兜底 + 打完自动收集详情（V4.4p）
    E1 自动打什么：kind 配置 + FAB(1=普通 / 2=对战) + 每学科"先对战再普通"换阶段 + 次数用尽处理
    E2 盲答：题库/接口没命中时 选择盲选 B、填空/听写盲填；只在自动打榜运行时生效
    E3 打完自动进挑战详情收集（接口版）：开关 + 结果页钩子 + 日志/落盘
+F 听力题(52)答案回填修复（V4.4q）
+   F1 题型 id 纠正：52=听力/听写（有输入框）、51=口语（录音）—— 旧版写反了，英语听力填不进去
+   F2 答案来源：知识库 L| > 详情缓存 > 题库；52 走听力分支，51 不入库
+   F3 输入框写入健壮化：多路径查找 + 写后读回 + 过滤器/Editable 降级 + 不再要求开自动作答
+   F4 打完自动收集详情时额外抓听力文本（L| / putListen）
+   F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.4p（唯一来源）
+   D1 XLModConfig.VERSION = v4.4q（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -214,8 +220,48 @@ ok(bank_apply({'t': 51, 'l': 'I have a dream'}, []) == ['I have a dream'], 'C4 �
 ok(bank_apply({'t': 11, 'opts': [{'i': 'z1', 'c': '', 'd': 'B'}], 'k': [0]},
               [{'i': 'z1', 'c': '', 'd': 'A'}]) == ['A'], 'C4 文本缺失时用选项ID兜底')
 
+print("F. 听力题(52)答案回填修复（V4.4q）")
+ok('QT_LISTEN = 52' in H and 'QT_SPOKEN = 51' in H,
+   'F1 题型常量按宿主映射：52=听力/听写（有输入框）、51=口语（录音）')
+ok('parseQType(q) == QT_LISTEN' in H and 'parseQType(q) != QT_LISTEN' in H,
+   'F1 听力判定（applyApiAnswers / applyListenAnswer / fetchByDetail / 悬浮窗）全部改用 52')
+ok(H.count('parseQType(q) == 51') == 0, 'F1 代码里不再把 51 当听力（旧版写反了，导致英语听力填不进去）')
+ok('QT_LISTEN = 52' in B and 'type == QT_LISTEN' in B and 'type == QT_SPOKEN' in B,
+   'F2 题库：52 走听力分支（l），51 口语不入库；apply() 也用 52 回填文本')
+ok('listenTextOf' in B and 'XLModBank.listenTextOf(qid)' in H,
+   'F2 听力答案来源三选一：知识库 L| > 详情缓存 > 题库（listenTextOf）')
+ok('writeEditText' in H and 'readEditText' in H and 'findListenEditText' in H and 'findEditTextInView' in H,
+   'F3 输入框写入：多路径查找（mEtAnswer → 任意 EditText 字段 → 视图树）+ 写入后读回校验')
+ok('et.setFilters(new android.text.InputFilter[0])' in H and 'ed.clear();' in H,
+   'F3 被 android:digits 过滤器/文本监听器吃掉时可降级（清过滤器 / 直接改 Editable）')
+ok('XLModConfig.isShowAnswerFloat() || XLModConfig.isDebugFloat()' in H,
+   'F3 回填不再要求开「自动作答」：开着答案悬浮窗也会把答案写进输入框')
+ok('（输入框已写入 ' in H and '（输入框未命中！）' in H,
+   'F3 回填日志会打"写入后的输入框内容 / 未命中"，便于排障')
+ok('int listenGot = 0' in H and '听力文本 ' in H,
+   'F4 打完自动收集详情时，额外把听力(52)标准答案写进知识库+题库（L| / putListen）')
+
+print("F5 听力回填算法镜像（52 才回填、51 不碰）")
+
+
+def listen_fill(qtype, has_box, text):
+    """镜像：只有听力(52)片段有输入框，且拿到答案才回填"""
+    if qtype != 52:
+        return '不处理'
+    if not has_box:
+        return '无输入框'
+    if not text:
+        return '没有答案'
+    return '回填:' + text
+
+
+ok(listen_fill(52, True, 'I have a dream') == '回填:I have a dream', 'F5 听力(52)+有输入框+有答案 → 回填')
+ok(listen_fill(52, True, '') == '没有答案', 'F5 听力(52) 没答案 → 不填（交给盲填）')
+ok(listen_fill(51, False, 'my answer') == '不处理', 'F5 口语(51) → 不处理（那是录音题）')
+ok(listen_fill(3, True, 'x') == '不处理', 'F5 填空(3) 走填空分支，不走听力回填')
+
 print("D. 版本与产物")
-ok('VERSION = "v4.4p"' in C, 'D1 XLModConfig.VERSION = v4.4p')
+ok('VERSION = "v4.4q"' in C, 'D1 XLModConfig.VERSION = v4.4q')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -244,9 +290,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.4p'), 'D2 APK 内含版本号 v4.4p（密文解回原文）')
+    ok(has('v4.4q'), 'D2 APK 内含版本号 v4.4q（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
@@ -270,7 +316,7 @@ ok('XLModConfig.sAutoEngineActive != 1' in H, 'E2 只在自动打榜运行时生
 ok('ans.size() >= 2 ? ans.get(1) : ans.get(0)' in H, 'E2 选择题盲选 B（第二个选项；只有一个选项时选第一个）')
 ok('blanks = q.answers.size()' in H and 'ua.answerContentList.add(fill)' in H,
    'E2 填空/听写盲填（填空按空数逐个填）')
-ok("t == 3 || t == 51" in H, 'E2 盲填覆盖填空(3)与听写(51)；口语(52)跳过')
+ok("t == QT_FILL || t == QT_LISTEN" in H, 'E2 盲填覆盖填空(3)与听力/听写(52)；口语(51)跳过')
 ok('isEmptyAnswer(ua)' in H and '已有答案：不动' in H, 'E2 已有答案时不覆盖（题库/接口优先）')
 ok('applyBlindFallback(q, ua);' in H and H.count('applyBlindFallback') >= 3,
    'E2 提交前钩子（applyApiAnswers）里调用：没开自动作答时也兜底')
@@ -331,4 +377,4 @@ if problems:
     for p in problems:
         print("  -", p)
     sys.exit(1)
-print("全部通过：普通挑战自动打 / 盲答兜底（选择题选B·填空乱填）/ 打完自动收集详情 / 管理员解锁 / 学科可选 / 题库作答 全部就位")
+print("全部通过：听力(52)回填修复 / 普通挑战自动打 / 盲答兜底 / 打完自动收集详情 / 管理员解锁 / 学科可选 / 题库作答 全部就位")
