@@ -631,6 +631,28 @@ tipGated(cardHwFix, gHw, "只发「课外作业」：把下面「课时」下拉
                 }
             }
         });
+        // ---------- 自定义每局题数 + 提前结算（V4.8p） ----------
+        EditText etQCount = inputRow(cardAuto, "每局题数(0=服务端默认)",
+                String.valueOf(XLModConfig.getNormalQCount()), ++rowId);
+        final EditText fEtQCount = etQCount;
+        etQCount.addTextChangedListener(new SimpleWatcher() {
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                try {
+                    XLModConfig.setNormalQCount(Integer.parseInt(fEtQCount.getText().toString().trim()));
+                } catch (Throwable t) {
+                }
+            }
+        });
+        spinnerRow(cardAuto, "提前结算方式",
+                new String[]{"正常提交（qStatus=1）", "放弃提交（qStatus=3）"},
+                Math.min(1, Math.max(0, XLModConfig.getFinishStatus())),
+                new SpinnerWatcher() { public void onPos(int pos) { XLModConfig.setFinishStatus(pos); } });
+        tipGated(cardAuto, gChallenge, "**每局题数**：0 = 不干预（按服务端总题数打完才提交）；填 N = 答满 N 题后，"
+                + "在下一题出现时**替你点宿主自己的「提交成绩」**，这一局才会真正**结算**（积分/战绩都靠这次提交）。\n"
+                + "宿主的逻辑是「打完服务端总题数才自动提交」，所以一直答下去是不会结算的 —— 想边刷边结算就把这里填成 10、20 这种。\n"
+                + "提交方式：正常提交(qStatus=1) 与宿主点「提交成绩」一致；若服务端对提前提交有意见，就换成「放弃提交(qStatus=3)」"
+                + "（宿主中途退出时用的就是它，同样会进结果页结算）。");
         tipGated(cardAuto, gChallenge, "**普通挑战无限刷（客户端核实结果）**：宿主的次数只是「开局时的一次服务端记账」——\n"
                 + "· 榜页：challengeSubjectTime(=normalTime) <= 0 就不让开局（客户端拦）；\n"
                 + "· 开局：competition/costChallengeCount 返回 functionCode==1 才算扣次成功，否则弹「次数已用完」退出（客户端拦）；\n"

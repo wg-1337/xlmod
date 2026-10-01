@@ -4084,10 +4084,20 @@ public class XLModHelper {
                 sAutoWaitingBattle = false;
                 sAutoStep = 2;
                 sFetchFailCount = 0;
+                sAutoQuestionsThisBattle = 0;      // V4.8p：新一局，题数归零
+                sFinishingBattle = false;
                 syncAutoActive();
             } else if (sAutoStep != 2) {
                 // 不在战斗中：不处理
                 return;
+            }
+            sAutoQuestionsThisBattle++;
+            // V4.8p：自定义每局题数 —— 答满 N 题后，下一题出现时就"替用户点提交成绩"，让这一局结算
+            int want = XLModConfig.getNormalQCount();
+            if (want > 0 && sAutoQuestionsThisBattle > want && !sFinishingBattle) {
+                trace("[题数] 本局已答满 " + want + " 题 → 提前提交结算（qStatus="
+                        + XLModConfig.finishStatusCode() + "）");
+                if (finishBattleNow(act)) return;   // 已发起提交：不再答这一题
             }
             trace("自动打榜: 题目出现，定时提交");
             final int idel = XLModConfig.getChallengeAnswerDelay();
@@ -4160,6 +4170,49 @@ public class XLModHelper {
 
     private static int sListenWaitCount = 0;
 
+    // ================= 自定义每局题数 / 提前结算（V4.8p） =================
+    /** 本局已出现的题数（第一题出现时置 0 再 ++） */
+    private static int sAutoQuestionsThisBattle = 0;
+    /** 已经发起过提前结算，避免重复提交 */
+    private static volatile boolean sFinishingBattle = false;
+
+    /**
+     * 替用户点宿主自己的「提交成绩」：反射调用
+     * {@code ChallengeQuestionBaseActivity.submitResultToServer(status, null, null, false)}
+     * （子类 {@code submitResult("1")} 也是走它）。成功后会进入结果页 → 服务端结算积分/云朵，
+     * 我们的结果页钩子（{@code claimBattleCloudAfterResult}）再把流程接回排行榜继续下一局。
+     *
+     * @return true = 已经发起提交（调用方不要继续答这一题）
+     */
+    private static boolean finishBattleNow(Activity act) {
+        try {
+            if (act == null) return false;
+            String status = XLModConfig.finishStatusCode();
+            java.lang.reflect.Method m = null;
+            Class<?> c = act.getClass();
+            while (c != null && m == null) {
+                try {
+                    m = c.getDeclaredMethod("submitResultToServer", String.class, String.class,
+                            String.class, boolean.class);
+                } catch (Throwable ignored) {
+                    c = c.getSuperclass();
+                }
+            }
+            if (m == null) {
+                trace("[题数] 提前结算失败：找不到 submitResultToServer（宿主版本可能变了）");
+                return false;
+            }
+            m.setAccessible(true);
+            sFinishingBattle = true;
+            m.invoke(act, status, null, null, Boolean.FALSE);
+            trace("[题数] 已发起提交（qStatus=" + status + "，本局题数=" + sAutoQuestionsThisBattle + "）");
+            return true;
+        } catch (Throwable t) {
+            trace("[题数] 提前结算异常: " + t);
+            return false;
+        }
+    }
+
     /** 挂点在 claimBattleCloudAfterResult 内（结果页 initAchieve）：延迟后自动关闭结果页回排行榜 */
     private static void autoResultExit(final Activity act) {
         try {
@@ -4167,6 +4220,8 @@ public class XLModHelper {
             if (sAutoStep != 2) return;
             sAutoStep = 1; // 返回排行榜续战
             sAutoBattlesThisSubject++;
+            sAutoQuestionsThisBattle = 0;      // V4.8p：本局结束，题数归零
+            sFinishingBattle = false;
             sFetchFailCount = 0;
             syncAutoActive();
             trace("自动打榜: 结果页退出 本学科已打=" + sAutoBattlesThisSubject + "（" + phaseName() + "）");

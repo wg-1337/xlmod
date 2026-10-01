@@ -667,7 +667,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.7p";
+    public static final String VERSION = "v4.8p";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -913,6 +913,33 @@ public class XLModConfig {
 
     public static void setUnlimitedSwitchAfter(int v) {
         wi("unlimited_switch_after", v < 0 ? 0 : v);
+    }
+
+    // ============ 自定义每局题数 + 提前结算（V4.8p） ============
+    /**
+     * 每局题数：0 = 不干预（按服务端总题数打完才提交）；
+     * &gt;0 = 答满 N 题就替用户点宿主自己的「提交成绩」，让这一局**结算**（普通挑战攒多少题都不会自动结算）。
+     */
+    public static int getNormalQCount() {
+        return i("normal_q_count", 0);
+    }
+
+    public static void setNormalQCount(int v) {
+        wi("normal_q_count", v < 0 ? 0 : (v > 100 ? 100 : v));
+    }
+
+    /** 提前结算用的提交状态：0 = 正常提交("1")，1 = 放弃提交("3")（宿主两条现成路径） */
+    public static int getFinishStatus() {
+        return i("finish_status", 0);
+    }
+
+    public static void setFinishStatus(int v) {
+        wi("finish_status", v <= 0 ? 0 : 1);
+    }
+
+    /** 提前结算的实际 qStatus 字符串 */
+    public static String finishStatusCode() {
+        return getFinishStatus() == 1 ? "3" : "1";
     }
 
     /**

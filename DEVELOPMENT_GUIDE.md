@@ -56,10 +56,10 @@
 |---|---|---|---|
 | **面板 UI / 文案 / 分区** | `mod-src/.../XLModActivity.java` | 若新增功能区 → `XLModFeatures.IDS`、明文 `features.json`（本地）、`docs/REMOTE_CONFIG.md` | 快速构建；`grep` 新控件存在 |
 | **新增/修改配置项** | `mod-src/.../XLModConfig.java`（`b()/i()/s()` + getter/setter） | 面板加控件；如需 smali 读 → 加 public static 字段 + `obf-rules.pro` | 快速构建 |
-| **云端授权开关** | `mod-src/.../XLModFeatures.java`（验签 + 公告 + 管理员放行）、`XLModCrypto.java`（PBKDF2/MD5） | 明文 `features.json`（本地，含 `admin_password`）→ `sign_config.py bundle` → 仓库只提交 `license.json`；`publish_license.py` / `update_license.bat`、`docs/REMOTE_CONFIG.md` | `verify_v47p.py`（A 组）+ `verify_remote_lock.py` + 远端 raw 比对 |
-| **管理员解锁（配置字段）** | `mod-src/.../XLModFeatures.java`（`loadAdminVerifier` / `verifyAdminPassword` / `adminVerifierReady`）、`XLModConfig`（`admin_unlocked`） | 面板「管理员解锁」卡片；签发侧 `sign_config.py set-pw`（密码只在本地明文配置里，payload 里只有 PBKDF2 块） | `verify_v47p.py`（A1/A2/A3）+ `sign_config.py verify-pw` |
-| **打榜学科（读取 + 每次可选）** | `mod-src/.../XLModConfig.java`（`known_subjects` / `challenge_selected_subjects` / `last_battle_subject` / `known_subjects_at`）、`XLModHelper.java`（探测模式 `startSubjectProbe`/`isSubjectProbeRunning`、每题显示登记、榜页 Intent、结果页 monthSubject、`filterSubjectsBySelection`） | 面板「自动打榜 → 每次要打的学科」勾选列表（**只列服务器真实返回的学科**，没读到就明确提示）+「立即探测学科」按钮；引擎启动唯一入口 `startWithSubjects` 里过滤 | `verify_v47p.py`（B 组）；日志 `学科探测: 服务器返回 …` / `[打榜] 学科勾选` |
-| **题库（同学对战 → 普通挑战）** | `mod-src/.../XLModBank.java`（采集/匹配/落盘/导出）、`XLModHelper.java`（`harvestBattle` 接入、`buildAutoAnswer`/`applyApiAnswers` 接入、详情入库） | 面板「金榜题名 → 题库」开关/统计/导出/清空；落盘 `/sdcard/Download/xlmod_qbank.json` | `verify_v47p.py`（C 组，含选项乱序的算法镜像）；日志 `[题库]` 行 |
+| **云端授权开关** | `mod-src/.../XLModFeatures.java`（验签 + 公告 + 管理员放行）、`XLModCrypto.java`（PBKDF2/MD5） | 明文 `features.json`（本地，含 `admin_password`）→ `sign_config.py bundle` → 仓库只提交 `license.json`；`publish_license.py` / `update_license.bat`、`docs/REMOTE_CONFIG.md` | `verify_v48p.py`（A 组）+ `verify_remote_lock.py` + 远端 raw 比对 |
+| **管理员解锁（配置字段）** | `mod-src/.../XLModFeatures.java`（`loadAdminVerifier` / `verifyAdminPassword` / `adminVerifierReady`）、`XLModConfig`（`admin_unlocked`） | 面板「管理员解锁」卡片；签发侧 `sign_config.py set-pw`（密码只在本地明文配置里，payload 里只有 PBKDF2 块） | `verify_v48p.py`（A1/A2/A3）+ `sign_config.py verify-pw` |
+| **打榜学科（读取 + 每次可选）** | `mod-src/.../XLModConfig.java`（`known_subjects` / `challenge_selected_subjects` / `last_battle_subject` / `known_subjects_at`）、`XLModHelper.java`（探测模式 `startSubjectProbe`/`isSubjectProbeRunning`、每题显示登记、榜页 Intent、结果页 monthSubject、`filterSubjectsBySelection`） | 面板「自动打榜 → 每次要打的学科」勾选列表（**只列服务器真实返回的学科**，没读到就明确提示）+「立即探测学科」按钮；引擎启动唯一入口 `startWithSubjects` 里过滤 | `verify_v48p.py`（B 组）；日志 `学科探测: 服务器返回 …` / `[打榜] 学科勾选` |
+| **题库（同学对战 → 普通挑战）** | `mod-src/.../XLModBank.java`（采集/匹配/落盘/导出）、`XLModHelper.java`（`harvestBattle` 接入、`buildAutoAnswer`/`applyApiAnswers` 接入、详情入库） | 面板「金榜题名 → 题库」开关/统计/导出/清空；落盘 `/sdcard/Download/xlmod_qbank.json` | `verify_v48p.py`（C 组，含选项乱序的算法镜像）；日志 `[题库]` 行 |
 | **隐私隐藏（设备信息）** | `mod-src/.../XLModHelper.java`（`sanitizeHeaders` / `cleanDeviceInfo`）、`XLModConfig`（privacy_*） | smali：请求头拦截器·intercept()、登录管理类·家长登录入口；`XLModFeatures.ALWAYS_ON` 必须含 `privacy` | `verify_privacy_v41.py` + `verify_privacy_independent.py` |
 | **云原片（绕过转码）** | `mod-src/.../XLModHelper.java`（`disguiseFileForCloud` / `spoofVideoHeader` / `disguisedMd5` / `uploadExtFor` / `prepareCloudKeepOriginal`） | smali：上传任务类（压缩入口 / 分块准备 / 整文件上传 / 两处扩展名赋值）、压缩码率工具类、压缩判定工具类、上传管理类；`obf-rules.pro` | `verify_dex_interlock.py` + 真机抓包看下载链接有无 `mp4_` 前缀；详见 `CLOUD_KEEP_ORIGINAL_DESIGN.md` §6 |
 | **布置作业修复** | `mod-src/.../XLModHelper.java`（`hw*`、`capture*`、`merge*`、`injectNow`、`prefetchQuestions`） | smali：作业页 Activity（含其回调内部类）、作业页 Fragment、作业 Helper；`obf-rules.pro` | 抓包/日志 `[抓取]`、`[注入]`；`HOMEWORK_PUBLISH_ANALYSIS.md` |
@@ -67,9 +67,9 @@
 | **字符串加密/解密** | `obf_strings.py`、`mod-src/.../Obf.java` | `obf_strings.py` 的 `FILES` 列表（新增 .java 要登记） | 解密自检（`verify_dex_interlock.py` 第 ④ 项） |
 | **注入点（新增一处 hook）** | apktool-out 下对应的 smali 文件 | 目标方法所在 dex 的 **method_ids 余量**、`obf-rules.pro` keep、`docs/INJECTION_POINTS.md` | 全量 apktool + `dexdump` 确认调用存在 |
 | **自动签到 / 打榜 / 答题 / 云朵** | `mod-src/.../XLModHelper.java`（`autoSignIfNeeded`、`autoOnRankResume`、`buildAutoAnswer`、`autoCloudIfNeeded`）+ `XLModConfig` | smali：主界面 Activity、答题相关页面、竞赛列表回调 等 | 运行日志里的 `[自动]` / `[打榜]` / `[题库]` / `[盲答]` 行 |
-| **自动打什么（对战/普通挑战）** | `XLModConfig.getChallengeKind`、`XLModHelper`（`sAutoPhaseNormal`、`needSwitchToNormal`、FAB `onFabMenuItemClick(1/2)`、`autoHandleQuotaExhausted`） | 面板「自动打什么」下拉 | `verify_v47p.py`（E1）；日志 `发起普通挑战(点击FAB 1)` / `本学科同学对战打满 → 转普通挑战` |
-| **盲答兜底（无答案时）** | `XLModHelper.applyBlindFallback` / `isEmptyAnswer`（挂在提交前钩子 `applyApiAnswers` 里） | `XLModConfig`（`blind_fallback` / `blind_fill_text`）+ 面板开关与「盲填内容」 | `verify_v47p.py`（E2/E4）；日志 `[盲答] 无答案 → 盲选 B / 盲填「…」` |
-| **打完自动收集挑战详情** | `XLModHelper.harvestChallengeDetail`（结果页钩子 `claimBattleCloudAfterResult` 里调）+ `XLModBank.harvestQuestion` | `XLModConfig.auto_harvest_detail` + 面板开关 | `verify_v47p.py`（E3）；日志 `[题库] 挑战详情采集完成（普通挑战）：详情 N 题…` |
+| **自动打什么（对战/普通挑战）** | `XLModConfig.getChallengeKind`、`XLModHelper`（`sAutoPhaseNormal`、`needSwitchToNormal`、FAB `onFabMenuItemClick(1/2)`、`autoHandleQuotaExhausted`） | 面板「自动打什么」下拉 | `verify_v48p.py`（E1）；日志 `发起普通挑战(点击FAB 1)` / `本学科同学对战打满 → 转普通挑战` |
+| **盲答兜底（无答案时）** | `XLModHelper.applyBlindFallback` / `isEmptyAnswer`（挂在提交前钩子 `applyApiAnswers` 里） | `XLModConfig`（`blind_fallback` / `blind_fill_text`）+ 面板开关与「盲填内容」 | `verify_v48p.py`（E2/E4）；日志 `[盲答] 无答案 → 盲选 B / 盲填「…」` |
+| **打完自动收集挑战详情** | `XLModHelper.harvestChallengeDetail`（结果页钩子 `claimBattleCloudAfterResult` 里调）+ `XLModBank.harvestQuestion` | `XLModConfig.auto_harvest_detail` + 面板开关 | `verify_v48p.py`（E3）；日志 `[题库] 挑战详情采集完成（普通挑战）：详情 N 题…` |
 | **日志/崩溃面包屑** | `mod-src/.../XLModConfig.java`（`logAppend`/`crashPut`）、`XLModHelper.bc()` | — | 面板「日志」导出 `/sdcard/Download/xlmod_log.txt` |
 
 ---
@@ -131,7 +131,7 @@ java -jar apktool/apktool.jar b -f -j 1 apktool-out -o xueleyun_mod_unsigned_ui.
 
 # ④ 验证（按改动挑，全部要跑一遍相关的）
 python verify_dex_interlock.py        # 互锁 + 密钥链
-python verify_v47p.py                 # V4.4p：普通挑战自动打/盲答兜底/打完收集详情/管理员密码/学科可选/题库
+python verify_v48p.py                 # V4.4p：普通挑战自动打/盲答兜底/打完收集详情/管理员密码/学科可选/题库
 python verify_remote_lock.py          # 授权语义（含签名）
 python verify_privacy_v41.py          # 隐私：请求头改写
 python verify_privacy_independent.py  # 隐私：不受云端影响

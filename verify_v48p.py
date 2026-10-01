@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.7p 全部新功能：
+"""验证 V4.8p 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.7p（唯一来源）
+   D1 XLModConfig.VERSION = v4.8p（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -374,8 +374,41 @@ ok(cost_ok(0, False) is False, 'H3 服务端返回 functionCode=0 且未开无�
 ok(cost_ok(0, True) is True, 'H3 服务端返回 functionCode=0 + 无限刷 → 当作成功，继续答题')
 ok(cost_ok(1, False) is True, 'H3 服务端正常扣次成功 → 照常（不受开关影响）')
 
+print("I. 自定义每局题数 + 提前结算（V4.8p）")
+ok('normal_q_count' in C and 'getNormalQCount' in C and 'finish_status' in C and 'finishStatusCode' in C,
+   'I1 新增「每局题数(0=服务端默认)」与「提前结算方式(qStatus 1/3)」配置')
+ok('sAutoQuestionsThisBattle' in H and 'sFinishingBattle' in H and 'finishBattleNow' in H,
+   'I1 引擎按局计题数，并只发起一次提前结算')
+ok('sAutoQuestionsThisBattle++' in H and 'sAutoQuestionsThisBattle > want' in H,
+   'I1 第 N+1 题出现时才结算（保证前 N 题都已提交）')
+ok('submitResultToServer' in H and 'getDeclaredMethod("submitResultToServer"' in H,
+   'I1 反射调用宿主自己的 submitResultToServer（与「提交成绩」按钮同一条路径）')
+ok('sAutoQuestionsThisBattle = 0;      // V4.8p：新一局，题数归零' in H,
+   'I1 开局题数归零（无限刷时每局独立计数）')
+ok('sAutoQuestionsThisBattle = 0;      // V4.8p：本局结束，题数归零' in H,
+   'I1 结算（结果页）后题数归零')
+ok('每局题数(0=服务端默认)' in A and '提前结算方式' in A and '一直答下去是不会结算的' in A,
+   'I1 面板有输入框 + 方式下拉 + 说明（含"宿主只在打完服务端总题数时才提交"这一核实结论）')
+ok('qStatus=1' in A and 'qStatus=3' in A, 'I1 面板说明里写明两种提交状态的含义')
+
+print("I2 结算时机镜像")
+
+
+def should_finish(shown_index, want, finishing):
+    """镜像 autoOnQuestionShown 的判定：shown_index 是"第几题出现"（第一题为 1）"""
+    if want <= 0 or finishing:
+        return False
+    return shown_index > want
+
+
+ok(should_finish(1, 0, False) is False, 'I2 每局题数=0（默认）→ 永不提前结算（按宿主原逻辑）')
+ok(should_finish(3, 10, False) is False, 'I2 第 3 题 / 目标 10 → 继续答')
+ok(should_finish(10, 10, False) is False, 'I2 第 10 题 → 照常答完（保证第 10 题被提交）')
+ok(should_finish(11, 10, False) is True, 'I2 第 11 题出现 → 发起提交结算')
+ok(should_finish(11, 10, True) is False, 'I2 已发起过提交 → 不重复提交')
+
 print("D. 版本与产物")
-ok('VERSION = "v4.7p"' in C, 'D1 XLModConfig.VERSION = v4.7p')
+ok('VERSION = "v4.8p"' in C, 'D1 XLModConfig.VERSION = v4.8p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -404,9 +437,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾', u'无限刷', u'暂无可填答案', u'已答满', u'提前提交结算'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.7p'), 'D2 APK 内含版本号 v4.7p（密文解回原文）')
+    ok(has('v4.8p'), 'D2 APK 内含版本号 v4.8p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 
