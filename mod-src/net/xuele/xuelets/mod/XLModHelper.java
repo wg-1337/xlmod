@@ -4006,6 +4006,7 @@ public class XLModHelper {
     private static void autoOnQuestionShown(final Activity act) {
         try {
             if (!XLModConfig.isAutoChallenge()) return;
+            sListenWaitCount = 0;       // V4.6p：换题了，听力等待次数归零
             if (sAutoWaitingBattle) {
                 // 本局第一题：进入战斗状态
                 sAutoWaitingBattle = false;
@@ -4019,12 +4020,21 @@ public class XLModHelper {
             trace("自动打榜: 题目出现，定时提交");
             final int idel = XLModConfig.getChallengeAnswerDelay();
             final boolean[] done = {false};
+            final int[] listenWaits = {0};
             android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
             h.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         if (done[0]) return;
+                        // V4.6p：听力题等标准答案（最多 ~8 秒），避免"抢在详情回来之前"提交成盲填
+                        if (shouldWaitListenAnswer()) {
+                            listenWaits[0]++;
+                            trace("自动打榜: 听力题等待标准答案（第 " + listenWaits[0] + " 次）");
+                            fetchByDetail(act);          // 再催一次详情
+                            h.postDelayed(this, 800);
+                            return;
+                        }
                         done[0] = true;
                         if (act instanceof net.xuele.xuelets.challenge.activity.ChallengeQuestionBaseActivity) {
                             ((net.xuele.xuelets.challenge.activity.ChallengeQuestionBaseActivity) act).submitSingleQuestion(false);
@@ -4049,11 +4059,34 @@ public class XLModHelper {
                     } catch (Throwable t) {
                     }
                 }
-            }, Math.max(300, idel + 5000));
+            }, Math.max(300, idel + 11000));
         } catch (Throwable t) {
             trace("自动打榜: questionShown异常 " + t);
         }
     }
+
+    /**
+     * V4.6p：当前题是不是"听力题且标准答案还没到" —— 是的话自动提交再等一会儿
+     * （最多 10 次 × 800ms ≈ 8 秒），避免把盲填的「不会」当成听力答案提交。
+     */
+    private static boolean shouldWaitListenAnswer() {
+        try {
+            if (!XLModConfig.isBlindFallback() && !XLModConfig.isAutoAnswer()) return false;
+            if (sFloatPH == null || sFloatPH.mQuestionList == null) return false;
+            if (sFloatPos < 0 || sFloatPos >= sFloatPH.mQuestionList.size()) return false;
+            M_ChallengeQuestion q = sFloatPH.mQuestionList.get(sFloatPos);
+            if (q == null || parseQType(q) != QT_LISTEN) return false;
+            if (sListenWaitCount >= 10) return false;
+            String real = listenAnswer(q.questionId == null ? "" : q.questionId);
+            if (!XLModBank.isJunk(real)) return false;
+            sListenWaitCount++;
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static int sListenWaitCount = 0;
 
     /** 挂点在 claimBattleCloudAfterResult 内（结果页 initAchieve）：延迟后自动关闭结果页回排行榜 */
     private static void autoResultExit(final Activity act) {
@@ -4270,25 +4303,47 @@ public class XLModHelper {
                                     M_ChallengeQuestion q = list.get(qi);
                                     if (q == null || q.questionId == null || q.questionId.isEmpty()) continue;
                                     sDetailMap.put(q.questionId, q);
-                                    // V4.4q：听力/听写(52) 的标准答案在详情答案映射里（sContent/answerContentList）
+                                    // V4.4q/V4.6p：听力(52)标准答案在详情答案映射的 **listenServerDesc**
+                                    //（其次 sContent）—— 不是 answerContentList（那里可能是学生自己的作答）
                                     if (parseQType(q) == QT_LISTEN && map != null) {
                                         try {
                                             net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(qi);
                                             String txt = "";
                                             if (u != null) {
-                                                if (u.answerContentList != null && !u.answerContentList.isEmpty()
+                                                if (u.listenServerDesc != null) txt = u.listenServerDesc;
+                                                if (XLModBank.isJunk(txt) && u.sContent != null) txt = u.sContent;
+                                                if (XLModBank.isJunk(txt) && u.answerContentList != null
+                                                        && !u.answerContentList.isEmpty()
                                                         && u.answerContentList.get(0) != null) {
                                                     txt = String.valueOf(u.answerContentList.get(0));
                                                 }
-                                                if ((txt == null || txt.isEmpty()) && u.sContent != null) {
-                                                    txt = u.sContent;
-                                                }
                                             }
-                                            if (txt != null && !txt.trim().isEmpty()) {
-                                                sDetailListenText.put(q.questionId, txt);
-                                                XLModConfig.kbPut(q.questionId, "L|" + txt);
+                                            if (!XLModBank.isJunk(txt)) {
+                                                sDetailListenText.put(q.questionId, txt.trim());
+                                                XLModConfig.kbPut(q.questionId, "L|" + txt.trim());
                                                 XLModBank.putListen(q.questionId, txt);
                                                 listenGot++;
+                                            }
+                                        } catch (Throwable ignored) {
+                                        }
+                                    }
+                                    // V4.6p：填空(3)标准答案 = 详情答案映射的 answerContentList（每空的 sContent）
+                                    if (parseQType(q) == QT_FILL && map != null) {
+                                        try {
+                                            net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(qi);
+                                            if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
+                                                XLModBank.putFillFromDetail(q.questionId,
+                                                        new java.util.ArrayList<String>(u.answerContentList));
+                                                StringBuilder fb = new StringBuilder("F|");
+                                                boolean any = false;
+                                                for (int bi = 0; bi < u.answerContentList.size(); bi++) {
+                                                    String s = u.answerContentList.get(bi);
+                                                    if (XLModBank.isJunk(s)) continue;
+                                                    if (bi > 0) fb.append("\u0001");
+                                                    fb.append(s.trim());
+                                                    any = true;
+                                                }
+                                                if (any) XLModConfig.kbPut(q.questionId, fb.toString());
                                             }
                                         } catch (Throwable ignored) {
                                         }
@@ -4436,7 +4491,7 @@ public class XLModHelper {
                     }
                 }
             }
-            // 51 听力 / 52 口语：答案不在题目数据中，交由悬浮窗展示解析
+            // 51 口语（录音）/ 52 听力（听写）：答案不在题目选项数据里，走 listenAnswer() 或悬浮窗
         } catch (Throwable t) {
         }
         return ua;
@@ -4456,11 +4511,12 @@ public class XLModHelper {
         }
     }
 
-    /** 知识库应用：S|=正确ID列表（选项/判断），F|=填空文本序列。命中返回 true */
+    /** 知识库应用：S|=正确ID列表（选项/判断），F|=填空文本序列。命中返回 true（盲填垃圾一律忽略） */
     private static boolean applyKb(String qid, M_ChallengeQuestion q, ChallengeUserAnswer ua) {
         try {
             String kb = XLModConfig.kbGet(qid);
             if (kb == null || kb.isEmpty()) return false;
+            if ((kb.startsWith("F|") || kb.startsWith("L|")) && XLModBank.isJunk(kb.substring(2))) return false;
             if (kb.startsWith("S|")) {
                 if (q.answers == null) return false;
                 java.util.HashSet<String> set = new java.util.HashSet<String>();
@@ -4511,14 +4567,18 @@ public class XLModHelper {
         if (ua == null || q == null) return ua;
         try {
             String qid = q.questionId == null ? "" : q.questionId;
-            // 0) 听力(51)：标准答案文本（详情 sContent / 知识库），需先填，生成判题模型时才能附带
+            // 0) 听力(52)：标准答案文本（详情 listenServerDesc / 知识库 L| / 题库），需先填
             if (parseQType(q) == QT_LISTEN) {
                 String lt = listenAnswer(qid);
-                if (lt != null && !lt.isEmpty()) {
+                if (!XLModBank.isJunk(lt)) {
+                    ua.answerIdList.clear();
                     ua.answerContentList.clear();
                     ua.answerContentList.add(lt);
                     return ua;
                 }
+                // 还没有标准答案：交给盲填兜底（盲填会再试一次标准答案）
+                applyBlindFallback(q, ua);
+                return ua;
             }
             if (q.answers == null) {
                 applyBlindFallback(q, ua);      // 没有选项数据（填空题常见）→ 盲填
@@ -4591,8 +4651,9 @@ public class XLModHelper {
      *
      * <ul>
      *   <li>单选/多选/判断（11/12/2）→ 选 <b>B</b>（第二个选项；只有一个选项时选第一个）；</li>
-     *   <li>填空（3）/听写（51）→ 填「盲填内容」（默认「不会」，面板可改）；</li>
-     *   <li>口语（52）→ 跳过（无法自动作答）。</li>
+     *   <li>填空（3）/听力听写（52）→ 填「盲填内容」（默认「不会」，面板可改）；
+     *       听力题会**再试一次标准答案**，找得到就不盲填；</li>
+     *   <li>口语（51）→ 跳过（录音题，无法自动作答）。</li>
      * </ul>
      *
      * <p>只对已在答题的自动打榜流程生效：{@code sAutoEngineActive==1}（手动答题不受影响）。</p>
@@ -4620,9 +4681,21 @@ public class XLModHelper {
                 return;
             }
             if (t == QT_FILL || t == QT_LISTEN) {
+                // V4.6p：真答案优先 —— 听力题先再试一次标准答案（详情/知识库/题库），
+                // 找得到就绝不用盲填（修复"拿到答案却填了「不会」"）。
+                if (t == QT_LISTEN) {
+                    String real = listenAnswer(q.questionId == null ? "" : q.questionId);
+                    if (!XLModBank.isJunk(real)) {
+                        ua.answerIdList.clear();
+                        ua.answerContentList.clear();
+                        ua.answerContentList.add(real);
+                        XLModConfig.logAppend("[盲答] 跳过（听力已拿到标准答案）: " + q.questionId);
+                        return;
+                    }
+                }
                 String fill = XLModConfig.getBlindFillText();
                 int blanks = 1;
-                if (t == 3 && q.answers != null && !q.answers.isEmpty()) blanks = q.answers.size();
+                if (t == QT_FILL && q.answers != null && !q.answers.isEmpty()) blanks = q.answers.size();
                 ua.answerIdList.clear();
                 ua.answerContentList.clear();
                 for (int i = 0; i < blanks; i++) ua.answerContentList.add(fill);
@@ -4654,16 +4727,19 @@ public class XLModHelper {
     }
 
     // ================= 听力/听写(52)自动作答 =================
-    /** 取听力标准答案：知识库(L|) > 详情缓存 > 题库 */
+    /** 取听力标准答案：详情 listenServerDesc > 知识库(L|) > 详情缓存 > 题库（垃圾值一律忽略） */
     private static String listenAnswer(String qid) {
         try {
             if (qid == null || qid.isEmpty()) return "";
+            String srv = sDetailListenText.get(qid);          // 详情映射（listenServerDesc / sContent）
+            if (srv != null && !XLModBank.isJunk(srv)) return srv;
             String kb = XLModConfig.kbGet(qid);
-            if (kb != null && kb.startsWith("L|")) return kb.substring(2);
-            String t = sDetailListenText.get(qid);
-            if (t != null && !t.isEmpty()) return t;
-            String fromBank = XLModBank.listenTextOf(qid);      // V4.4q：题库里也存听力答案
-            return fromBank == null ? "" : fromBank;
+            if (kb != null && kb.startsWith("L|") && !XLModBank.isJunk(kb.substring(2))) {
+                return kb.substring(2).trim();
+            }
+            String fromBank = XLModBank.listenTextOf(qid);    // 题库
+            if (fromBank != null && !XLModBank.isJunk(fromBank)) return fromBank;
+            return "";
         } catch (Throwable t) {
             return "";
         }
@@ -4906,18 +4982,17 @@ public class XLModHelper {
                 return;
             }
             Object ua = getFieldValue(fragment, "mUserAnswer");
-            String text = "";
             java.util.List list = null;
+            String inUa = "";
+            String serverDesc = "";
             if (ua != null) {
                 Object l = getFieldValue(ua, "answerContentList");
                 if (l instanceof java.util.List) {
                     list = (java.util.List) l;
-                    if (!list.isEmpty() && list.get(0) != null) text = String.valueOf(list.get(0));
+                    if (!list.isEmpty() && list.get(0) != null) inUa = String.valueOf(list.get(0));
                 }
-                if (text.isEmpty()) {
-                    Object sc = getFieldValue(ua, "sContent");
-                    if (sc != null) text = String.valueOf(sc);
-                }
+                Object ls = getFieldValue(ua, "listenServerDesc");     // 详情映射里的听力标准答案
+                if (ls != null) serverDesc = String.valueOf(ls);
             }
             String qid = "";
             Object q = getFieldValue(fragment, "mQuestion");
@@ -4925,17 +5000,32 @@ public class XLModHelper {
                 Object qidO = getFieldValue(q, "questionId");
                 if (qidO != null) qid = String.valueOf(qidO);
             }
-            if (text.isEmpty() && !qid.isEmpty()) text = listenAnswer(qid);
+            // V4.6p：真实答案优先（详情 listenServerDesc > 知识库 L| > 题库），
+            // 绝不会再出现"拿到了答案却把盲填的「不会」写进输入框"。
+            String real = !qid.isEmpty() ? listenAnswer(qid) : "";
+            if (XLModBank.isJunk(real) && !XLModBank.isJunk(serverDesc)) real = serverDesc.trim();
+            String text = "";
+            String src = "";
+            if (!XLModBank.isJunk(real)) {
+                text = real;
+                src = "标准答案";
+            } else if (!XLModBank.isJunk(inUa)) {
+                text = inUa.trim();
+                src = "已有作答";
+            } else if (XLModConfig.isBlindFallback() && XLModConfig.sAutoEngineActive == 1) {
+                text = XLModConfig.getBlindFillText();
+                src = "盲填兜底";
+            }
             if (text == null || text.isEmpty()) {
                 XLModConfig.logAppend("[听力] 提交前回填：还没有答案（" + qid + "），本空先交给盲填");
                 return;
             }
-            if (list != null && (list.isEmpty() || !text.equals(String.valueOf(list.get(0))))) {
+            if (list != null && !text.equals(String.valueOf(list.isEmpty() ? "" : list.get(0)))) {
                 list.clear();
                 list.add(text);
             }
             boolean ok = setFragmentListenText(fragment, text);
-            XLModConfig.logAppend("[听力] 提交前回填: " + qid + " → " + text
+            XLModConfig.logAppend("[听力] 提交前回填(" + src + "): " + qid + " → " + text
                     + (ok ? "（输入框已写入 " + readListenBox(fragment) + "）" : "（输入框未命中！）"));
         } catch (Throwable t) {
             XLModConfig.logAppend("[听力] 提交前回填异常: " + t);
@@ -5293,16 +5383,33 @@ public class XLModHelper {
                                     M_ChallengeQuestion q = list.get(i);
                                     if (q == null || q.questionId == null) continue;
                                     sDetailMap.put(q.questionId, q);
-                                    // 听写题：官方详情把标准答案放在 sContent（initAnswer → answerContentList）
+                                    // V4.6p：听力(52)标准答案是详情答案映射的 listenServerDesc（其次 sContent）
                                     if (parseQType(q) == QT_LISTEN && map != null) {
                                         net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(i);
-                                        if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
-                                            String txt = u.answerContentList.get(0);
-                                            if (txt != null && !txt.isEmpty()) {
-                                                sDetailListenText.put(q.questionId, txt);
-                                                XLModConfig.kbPut(q.questionId, "L|" + txt);
-                                                XLModBank.putListen(q.questionId, txt);
+                                        String txt = "";
+                                        if (u != null) {
+                                            if (u.listenServerDesc != null) txt = u.listenServerDesc;
+                                            if (XLModBank.isJunk(txt) && u.sContent != null) txt = u.sContent;
+                                            if (XLModBank.isJunk(txt) && u.answerContentList != null
+                                                    && !u.answerContentList.isEmpty()
+                                                    && u.answerContentList.get(0) != null) {
+                                                txt = String.valueOf(u.answerContentList.get(0));
                                             }
+                                        }
+                                        if (!XLModBank.isJunk(txt)) {
+                                            sDetailListenText.put(q.questionId, txt.trim());
+                                            XLModConfig.kbPut(q.questionId, "L|" + txt.trim());
+                                            XLModBank.putListen(q.questionId, txt);
+                                            XLModConfig.logAppend("[听力] 详情拿到标准答案: " + q.questionId
+                                                    + " → " + txt.trim());
+                                        }
+                                    }
+                                    // V4.6p：填空(3)标准答案 = 详情答案映射的 answerContentList
+                                    if (parseQType(q) == QT_FILL && map != null) {
+                                        net.xuele.android.ui.question.ChallengeUserAnswer u = map.get(i);
+                                        if (u != null && u.answerContentList != null && !u.answerContentList.isEmpty()) {
+                                            XLModBank.putFillFromDetail(q.questionId,
+                                                    new java.util.ArrayList<String>(u.answerContentList));
                                         }
                                     }
                                 }

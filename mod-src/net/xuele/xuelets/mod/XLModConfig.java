@@ -138,6 +138,11 @@ public class XLModConfig {
             sLastInitSyncAt = now;
             syncHwTargetsWithFile();
         }
+        // V4.6p：一次性清理知识库里的盲填垃圾（旧版本把「不会」当成过正确答案）
+        try {
+            kbPurgeJunk();
+        } catch (Throwable ignored) {
+        }
         if (context != null && sAppCtx == null) {
             try {
                 sAppCtx = context.getApplicationContext();
@@ -662,7 +667,7 @@ public class XLModConfig {
     }
 
     /** 当前 Mod 版本号（唯一来源：面板显示、更新检测都用它）。作者的标签习惯是 v<版本号> */
-    public static final String VERSION = "v4.5p";
+    public static final String VERSION = "v4.6p";
 
     /** 隐私隐藏：是否同时清空请求头里的机型/系统版本（phoneModel / systemVersion） */
     public static boolean isPrivacyHideModel() {
@@ -926,6 +931,52 @@ public class XLModConfig {
     public static String kbGet(String key) {
         if (key == null || key.isEmpty()) return "";
         return s("kb_" + key, "");
+    }
+
+    /**
+     * V4.6p：一次性清理知识库里被当成正确答案的**盲填垃圾**（旧版本会把「不会」写进 kb）。
+     * 逐条看 F|/L| 文本：空或等于盲填内容 → 整条删除（宁缺勿错，避免继续拿它当答案）。
+     */
+    public static int kbPurgeJunk() {
+        try {
+            if (b("kb_junk_purged_v46", false)) return 0;
+            wb("kb_junk_purged_v46", true);
+            SharedPreferences p = p();
+            if (p == null) return 0;
+            String blind = getBlindFillText();
+            java.util.Map<String, ?> all = p.getAll();
+            SharedPreferences.Editor ed = p.edit();
+            int n = 0;
+            for (java.util.Map.Entry<String, ?> e : all.entrySet()) {
+                String k = e.getKey();
+                if (k == null || !k.startsWith("kb_")) continue;
+                Object v = e.getValue();
+                if (!(v instanceof String)) continue;
+                String s = (String) v;
+                if (!(s.startsWith("F|") || s.startsWith("L|"))) continue;
+                String body = s.substring(2);
+                boolean junk = body.trim().isEmpty() || body.trim().equals(blind);
+                if (!junk && body.indexOf('\u0001') >= 0) {
+                    for (String part : body.split("\u0001")) {
+                        if (part.trim().isEmpty() || part.trim().equals(blind)) {
+                            junk = true;
+                            break;
+                        }
+                    }
+                }
+                if (junk) {
+                    ed.remove(k);
+                    n++;
+                }
+            }
+            if (n > 0) {
+                ed.apply();
+                logAppend("[题库] 已清理知识库里 " + n + " 条盲填垃圾（旧版本把「" + blind + "」当成过正确答案）");
+            }
+            return n;
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     // ============ 管理员解锁（V4.3p） ============

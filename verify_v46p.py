@@ -4,7 +4,7 @@
 # 本文件按 GNU Affero 通用公共许可证第 3 版（或更高版本）发布，详见仓库根目录 LICENSE。
 
 # -*- coding: utf-8 -*-
-"""验证 V4.5p 全部新功能：
+"""验证 V4.6p 全部新功能：
 
 A 管理员密码（写在明文配置里，签发时换算成校验块；面板输入解锁全部功能）
    A1 端上：管理员放行逻辑 / 校验块只进内存（不落盘）/ 密码校验 / 面板入口
@@ -32,7 +32,7 @@ F 听力题(52)答案回填修复（V4.4q）
    F4 打完自动收集详情时额外抓听力文本（L| / putListen）
    F5 算法镜像：只有 52+有输入框+有答案才回填
 D 版本与产物
-   D1 XLModConfig.VERSION = v4.5p（唯一来源）
+   D1 XLModConfig.VERSION = v4.6p（唯一来源）
    D2 APK：dex 索引连续、classes7 内含新功能密文串（用守卫密钥解回原文）
 """
 import base64
@@ -260,8 +260,76 @@ ok(listen_fill(52, True, '') == '没有答案', 'F5 听力(52) 没答案 → 不
 ok(listen_fill(51, False, 'my answer') == '不处理', 'F5 口语(51) → 不处理（那是录音题）')
 ok(listen_fill(3, True, 'x') == '不处理', 'F5 填空(3) 走填空分支，不走听力回填')
 
+print("G. 听力答案来源 + 题库不再收盲填垃圾（V4.6p）")
+ok('listenServerDesc' in H and H.count('listenServerDesc') >= 3,
+   'G1 听力标准答案取详情映射的 listenServerDesc（宿主 initAnswer 里 52 型答案就在这里）')
+ok('u.listenServerDesc' in H and 'isJunk(txt) && u.sContent != null' in H,
+   'G1 取值顺序：listenServerDesc → sContent → answerContentList（且逐级查垃圾）')
+ok('putFillFromDetail' in B and 'putFillFromDetail' in H,
+   'G1 填空题标准答案改由详情答案映射入库（answerContentList = 每空的 sContent）')
+ok('isJunk' in B and '盲填内容永不入库' in B,
+   'G2 题库新增垃圾判定：盲填内容/空值永不入库')
+ok('没标记就不入库（标准答案走 putFillFromDetail）' in B,
+   'G2 填空/听力不再"没标记就拿 answerContent 当标准答案"（V4.6p 关闭污染源）')
+ok('purgeJunkEntries' in B and '清理盲填垃圾' in B,
+   'G2 载入题库时清理历史污染（丢弃答案全是垃圾的条目、剔除垃圾字段）')
+ok('kbPurgeJunk' in C and 'kb_junk_purged_v46' in C,
+   'G2 知识库一次性清理（旧版本写进 kb 的「不会」被删掉）')
+ok('提交前回填(" + src + ")' in H and '"标准答案"' in H and '"盲填兜底"' in H,
+   'G3 回填优先级：标准答案 > 已有作答 > 盲填兜底（日志会标注来源）')
+ok('listenServerDesc' in H and 'isJunk(serverDesc)' in H,
+   'G3 回填时把 listenServerDesc 也当答案来源')
+ok('shouldWaitListenAnswer' in H and '听力题等待标准答案' in H,
+   'G4 自动打榜：听力题最多等 ~8 秒标准答案，不抢着提交成盲填')
+ok('跳过（听力已拿到标准答案）' in H, 'G4 盲答前再试一次标准答案，找得到就不盲填')
+
+print("G5 算法镜像（旧版 vs V4.6p）")
+
+
+def old_listen_value(u):
+    """旧版：只看 answerContentList（听力题里通常是空的 → 落到盲填）"""
+    return u.get('answerContentList') or ['']
+
+
+def new_listen_value(u):
+    """V4.6p：listenServerDesc → sContent → answerContentList，垃圾值忽略"""
+    for k in ('listenServerDesc', 'sContent', 'answerContentList'):
+        v = u.get(k)
+        if not v:
+            continue
+        t = v[0] if isinstance(v, list) else v
+        if t and t.strip() and t.strip() != '不会':
+            return t
+    return ''
+
+
+detail = {'listenServerDesc': 'I have a dream', 'sContent': '', 'answerContentList': []}
+ok(old_listen_value(detail) == [''], 'G5 旧版：听力题的 answerContentList 为空 → 拿不到答案（随后盲填「不会」）')
+ok(new_listen_value(detail) == 'I have a dream', 'G5 V4.6p：从 listenServerDesc 取到真实答案')
+ok(new_listen_value({'listenServerDesc': '', 'sContent': 'Hello world'}) == 'Hello world',
+   'G5 没有 listenServerDesc 时回落到 sContent')
+ok(new_listen_value({'answerContentList': ['不会']}) == '', 'G5 盲填的「不会」不会被当成答案')
+
+
+def harvest_old(answer_content):
+    return answer_content          # 旧版：answerContent 直接当标准答案
+
+
+def harvest_new(answer_content, is_correct):
+    if not is_correct:
+        return None                # V4.6p：没正确标记 → 不入库
+    if answer_content.strip() in ('不会', ''):
+        return None                # 垃圾值不入库
+    return answer_content
+
+
+ok(harvest_old('不会') == '不会', 'G5 旧版：盲填的「不会」被当成正确答案写进题库（正是你看到的问题）')
+ok(harvest_new('不会', False) is None, 'G5 V4.6p：没正确标记 → 不入库')
+ok(harvest_new('不会', True) is None, 'G5 V4.6p：即使是"正确项"，「不会」这类垃圾也拒绝入库')
+ok(harvest_new('光合作用', True) == '光合作用', 'G5 V4.6p：真正的标准答案照常入库')
+
 print("D. 版本与产物")
-ok('VERSION = "v4.5p"' in C, 'D1 XLModConfig.VERSION = v4.5p')
+ok('VERSION = "v4.6p"' in C, 'D1 XLModConfig.VERSION = v4.6p')
 ok('MOD_VER = XLModConfig.VERSION' in A, 'D1 面板版本号引用唯一来源')
 
 if os.path.exists(APK):
@@ -290,9 +358,9 @@ if os.path.exists(APK):
         return any(phrase in s for s in found)
 
     for phrase in (u'管理员已解锁（全部功能放行，本地覆盖云端开关）', u'解锁全部功能', u'每次要打的学科',
-                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中'):
+                   u'题库', u'同学对战采集: 本局入库 ', u'命中作答: ', u'管理员密码不正确', u'盲答', u'挑战详情采集', u'提交前回填', u'输入框未命中', u'详情拿到标准答案', u'清理盲填垃圾'):
         ok(has(phrase), 'D2 APK 内含新功能字符串「%s」（守卫密钥解密验证）' % phrase[:16])
-    ok(has('v4.5p'), 'D2 APK 内含版本号 v4.5p（密文解回原文）')
+    ok(has('v4.6p'), 'D2 APK 内含版本号 v4.6p（密文解回原文）')
 else:
     ok(False, 'D2 找不到 APK：%s' % APK)
 

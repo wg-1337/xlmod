@@ -98,7 +98,14 @@ public final class XLModBank {
         }
     }
 
-    /** 单题入库（同学对战 / 详情接口共用）；有可记录的正确答案才入库，返回是否新增/更新 */
+    /**
+     * 单题入库（同学对战 / 详情接口共用）。
+     *
+     * <p><b>V4.6p 重要修正</b>：填空(3)/听力(52) 的文本答案**只认"带正确标记"的**；
+     * 以前"没有 isCorrect 就拿 answerContent 当标准答案"，会把学生自己提交的答案
+     * （尤其是盲填的「不会」）当成正确答案存进题库 —— 这条路径已彻底关闭，
+     * 标准答案改由详情答案映射提供（{@link #putListen} / {@link #putFillFromDetail}）。</p>
+     */
     public static boolean harvestQuestion(M_ChallengeQuestion q, String src) {
         try {
             if (!enabled() || q == null) return false;
@@ -126,40 +133,21 @@ public final class XLModBank {
                     opts.put(o);
                     boolean correct = a.isCorrect != null && "1".equals(a.isCorrect.trim());
                     if (correct) right.put(i);
-                    if (type == QT_FILL && correct && a.answerContent != null && !a.answerContent.trim().isEmpty()) {
-                        fill.put(a.answerContent);      // 有正确标记的填空：只收标记过的空
+                    if ((type == QT_FILL || type == QT_LISTEN) && correct && !isJunk(a.answerContent)) {
+                        fill.put(a.answerContent.trim());    // 只有带正确标记的文本才收
                     }
                 }
             }
             if (type == QT_FILL) {
-                if (fill.length() == 0) {
-                    // 没有正确标记时：同学对战/详情数据里的 answerContent 就是标准答案文本，按空位顺序收
-                    if (ans != null) {
-                        for (AnswersBean a : ans) {
-                            if (a != null && a.answerContent != null && !a.answerContent.trim().isEmpty()) {
-                                fill.put(a.answerContent);
-                            }
-                        }
-                    }
-                }
-                if (fill.length() == 0) return false;
+                if (fill.length() == 0) return false;        // 没标记就不入库（标准答案走 putFillFromDetail）
                 e.put("f", fill);
             } else if (type == QT_LISTEN) {
-                // 听力/听写（52，有输入框）：答案文本放在 l（详情接口/答案文本更可靠）
-                if (fill.length() == 0 && ans != null) {
-                    for (AnswersBean a : ans) {
-                        if (a != null && a.answerContent != null && !a.answerContent.trim().isEmpty()) {
-                            fill.put(a.answerContent);
-                            break;
-                        }
-                    }
-                }
-                if (fill.length() == 0) return false;     // 听力答案一般只能等详情接口（putListen）
-                e.put("l", fill.optString(0, ""));
+                if (fill.length() == 0) return false;         // 听力标准答案走 putListen（listenServerDesc）
+                e.put("l", fill.optString(0, "").trim());
             } else if (type == QT_SPOKEN) {
-                return false;                             // 口语（51）是录音题：没有可填的文本答案
+                return false;                                 // 口语（51）是录音题：没有可填的文本答案
             } else {
-                if (right.length() == 0) return false;    // 没有正确标记的题目不入库（避免污染）
+                if (right.length() == 0) return false;        // 没有正确标记的题目不入库（避免污染）
                 e.put("k", right);
             }
             if (opts.length() > 0) e.put("opts", opts);
@@ -172,11 +160,31 @@ public final class XLModBank {
         }
     }
 
-    /** 听力/听写题(52)标准答案（详情接口 sContent / 答案文本）入库 */
+    /**
+     * V4.6p：判断"垃圾答案"——空、盲填内容（面板可配的「不会」等）。
+     * 这类文本永不入库、也永不当作已命中的答案。
+     */
+    public static boolean isJunk(String text) {
+        if (text == null) return true;
+        String t = text.trim();
+        if (t.isEmpty()) return true;
+        try {
+            String blind = XLModConfig.getBlindFillText();
+            if (blind != null && !blind.isEmpty() && t.equals(blind.trim())) return true;
+            if ("不会".equals(t) || "不知道".equals(t)) return true;   // 兜底：常见盲填词
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
+    /**
+     * 听力/听写题(52)标准答案入库 —— 来源必须是**详情答案映射的 listenServerDesc（其次 sContent）**，
+     * 不是题目选项里的 answerContent（那里可能是学生自己提交的答案）。
+     */
     public static void putListen(String qid, String text) {
         try {
             if (!enabled() || qid == null || qid.trim().isEmpty()) return;
-            if (text == null || text.trim().isEmpty()) return;
+            if (isJunk(text)) return;                       // V4.6p：盲填内容永不入库
             JSONObject e = sById.get(qid.trim());
             if (e == null) {
                 e = new JSONObject();
@@ -185,7 +193,35 @@ public final class XLModBank {
                 e.put("c", "");
                 e.put("src", "detail");
             }
-            e.put("l", text);
+            e.put("l", text.trim());
+            e.put("ts", System.currentTimeMillis());
+            put(qid.trim(), e);
+            save(false);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** V4.6p：填空题(3)标准答案入库（来源=详情答案映射 answerContentList，即每空的 sContent） */
+    public static void putFillFromDetail(String qid, java.util.List<String> texts) {
+        try {
+            if (!enabled() || qid == null || qid.trim().isEmpty()) return;
+            if (texts == null || texts.isEmpty()) return;
+            JSONArray f = new JSONArray();
+            for (String s : texts) {
+                if (isJunk(s)) return;                      // 有一空是垃圾就整题不记（宁缺勿错）
+                f.put(s.trim());
+            }
+            if (f.length() == 0) return;
+            JSONObject e = sById.get(qid.trim());
+            if (e == null) {
+                e = new JSONObject();
+                e.put("id", qid.trim());
+                e.put("t", QT_FILL);
+                e.put("c", "");
+                e.put("src", "detail");
+            }
+            if (e.optInt("t", 0) != QT_FILL) return;
+            e.put("f", f);
             e.put("ts", System.currentTimeMillis());
             put(qid.trim(), e);
             save(false);
@@ -464,9 +500,78 @@ public final class XLModBank {
                     if (!sig.isEmpty()) sSig2Id.put(sig, qid);
                 }
                 XLModConfig.logAppend("[题库] 已加载本地题库: " + sById.size() + " 题");
+                purgeJunkEntries();
             } catch (Throwable t) {
                 sLastError = "读取题库失败: " + t;
             }
+        }
+    }
+
+    /**
+     * V4.6p：清理历史污染 —— 旧版本可能把盲填内容（「不会」等）当成正确答案存进题库。
+     * 载入时跑一次：丢掉"答案全是垃圾"的条目，以及条目里垃圾的 f/l 字段。
+     */
+    private static void purgeJunkEntries() {
+        try {
+            java.util.ArrayList<String> drop = new java.util.ArrayList<String>();
+            int cleaned = 0;
+            for (String qid : new java.util.ArrayList<String>(sById.keySet())) {
+                JSONObject e = sById.get(qid);
+                if (e == null) continue;
+                int type = e.optInt("t", 0);
+                if (type != QT_FILL && type != QT_LISTEN) continue;
+                boolean hasReal = false;
+                JSONArray f = e.optJSONArray("f");
+                if (f != null) {
+                    for (int i = 0; i < f.length(); i++) {
+                        if (!isJunk(f.optString(i, ""))) hasReal = true;
+                    }
+                }
+                if (!isJunk(e.optString("l", ""))) hasReal = true;
+                // 带正确标记的选项也算真答案
+                JSONArray k = e.optJSONArray("k");
+                if (k != null && k.length() > 0) hasReal = true;
+                if (!hasReal) {
+                    drop.add(qid);
+                    continue;
+                }
+                boolean fixed = false;
+                if (f != null) {
+                    JSONArray nf = new JSONArray();
+                    for (int i = 0; i < f.length(); i++) {
+                        String s = f.optString(i, "");
+                        if (isJunk(s)) {
+                            fixed = true;
+                        } else {
+                            nf.put(s);
+                        }
+                    }
+                    if (fixed) {
+                        if (nf.length() == 0) {
+                            e.remove("f");
+                        } else {
+                            e.put("f", nf);
+                        }
+                    }
+                }
+                if (isJunk(e.optString("l", "")) && e.has("l")) {
+                    e.remove("l");
+                    fixed = true;
+                }
+                if (fixed) cleaned++;
+            }
+            for (String qid : drop) {
+                JSONObject e = sById.remove(qid);
+                if (e != null) sSig2Id.remove(e.optString("sig", ""));
+            }
+            if (!drop.isEmpty() || cleaned > 0) {
+                sDirty = true;
+                XLModConfig.logAppend("[题库] 清理盲填垃圾: 删除 " + drop.size() + " 题、修正 "
+                        + cleaned + " 题（旧版本把「" + XLModConfig.getBlindFillText() + "」当成过正确答案）");
+                save(true);
+            }
+        } catch (Throwable t) {
+            sLastError = "清理题库失败: " + t;
         }
     }
 
